@@ -1,0 +1,20 @@
+project_name: "PaperPilot-Lite"
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  index_dir: "data/index"
+  eval_dir: "data/eval"
+
+chunking:
+  chunk_size: 500
+  overlap: 100
+
+retrieval:
+  top_k: 5
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  similarity: "cosine"
+
+logging:
+  log_file: "logs/app.log"
+  level: "INFO"
