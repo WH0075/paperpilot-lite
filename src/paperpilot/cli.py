@@ -12,6 +12,7 @@ from .llm_client import MockLLMClient
 from .rag_pipeline import RAGPipeline
 from .retriever import Retriever
 from .vector_store import VectorStore
+from .evaluator import load_qa_set, evaluate_retrieval, print_evaluation_report
 
 
 def handle_ingest(args: argparse.Namespace) -> None:
@@ -153,6 +154,34 @@ def handle_ask(args: argparse.Namespace) -> None:
         print("Raw Search Results")
         print("=" * 80)
         print_search_results(response["search_results"])
+
+
+def handle_eval(args: argparse.Namespace) -> None:
+
+    ks = args._get_kwargs
+
+    retriever = Retriever.from_index(
+        index_dir=args.index_dir,
+        model_name=args.model_name,
+        device=args.device,
+        normalize_embeddings=args.normalize_embeddings,
+        batch_size=args.batch_size,
+        default_top_k=max(ks),
+    )
+
+    qa_items = load_qa_set(args.qa_path)
+
+    report = evaluate_retrieval(
+        retriever=retriever,
+        qa_items=qa_items,
+        ks=ks,
+    )
+
+    print_evaluation_report(
+        report=report,
+        show_failed_cases=args.show_failed_cases,
+        max_failed_cases=args.max_failed_cases,
+    )
 
 
 def print_search_results(results: list[dict[str, Any]]) -> None:
@@ -429,6 +458,68 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask_parser.set_defaults(
         func=handle_ask,
+        normalize_embeddings=True,
+    )
+
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Evaluate retrieval quality with Recall@K.",
+    )
+    eval_parser.add_argument(
+        "qa_path",
+        type=str,
+        help="Path to QA set jsonl file, such as data/eval/qa_set.jsonl.",
+    )
+    eval_parser.add_argument(
+        "--index-dir",
+        type=str,
+        default="data/index",
+        help="Directory containing vector index. Default: data/index.",
+    )
+    eval_parser.add_argument(
+        "--ks",
+        type=int,
+        nargs="+",
+        default=[1, 3, 5],
+        help="K values for Recall@K. Default: 1 3 5.",
+    )
+    eval_parser.add_argument(
+        "--model-name",
+        type=str,
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="Sentence-transformers embedding model name.",
+    )
+    eval_parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="Device for embedding model, such as cpu or cuda. Default: cpu.",
+    )
+    eval_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Embedding batch size. Default: 32.",
+    )
+    eval_parser.add_argument(
+        "--show-failed-cases",
+        action="store_true",
+        help="Print failed retrieval cases.",
+    )
+    eval_parser.add_argument(
+        "--max-failed-cases",
+        type=int,
+        default=10,
+        help="Maximum number of failed cases to print. Default: 10.",
+    )
+    eval_parser.add_argument(
+        "--no-normalize-embeddings",
+        action="store_false",
+        dest="normalize_embeddings",
+        help="Disable embedding normalization.",
+    )
+    eval_parser.set_defaults(
+        func=handle_eval,
         normalize_embeddings=True,
     )
 

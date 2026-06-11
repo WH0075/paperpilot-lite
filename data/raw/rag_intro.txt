@@ -1,5 +1,13 @@
-Retrieval-Augmented Generation, or RAG, is a method that combines information retrieval with language generation.
+Retrieval-Augmented Generation, or RAG, is a method that combines information retrieval with language generation. The main idea is simple: before asking a language model to answer a question, the system first retrieves relevant information from an external knowledge base.
 
-A RAG system first retrieves relevant documents from an external knowledge base. Then it provides these documents as context to a language model.
+A RAG system usually has two stages. The first stage is offline indexing. In this stage, documents are loaded, cleaned, split into chunks, converted into embeddings, and stored in a vector store. The second stage is online question answering. In this stage, the user query is embedded, similar chunks are retrieved, and the retrieved context is inserted into a prompt for the language model.
 
-This helps reduce hallucination and allows the model to answer questions using up-to-date or private information.
+RAG is useful because large language models may not know private, recent, or domain-specific knowledge. Instead of fine-tuning the model every time new documents appear, RAG allows the system to connect the model with external documents. This makes it especially useful for enterprise knowledge bases, paper reading assistants, and project documentation search.
+
+Metadata is important in RAG. Each chunk should keep information such as file name, page number, chunk id, and character offsets. Metadata allows the system to cite sources, debug retrieval results, and evaluate whether the correct evidence was retrieved.
+
+RAG can reduce hallucination, but it does not automatically eliminate hallucination. If the retriever returns irrelevant chunks, the generator may still produce an unsupported answer. If the prompt does not clearly instruct the model to use only the given context, the model may rely on outside knowledge. Therefore, a good RAG system needs both retrieval evaluation and generation evaluation.
+
+The top-k parameter controls how many chunks are returned by the retriever. A small top-k may miss useful evidence. A large top-k may include noisy or irrelevant chunks, which can confuse the language model. Choosing top-k is an important part of RAG system design.
+
+A reliable RAG answer should be grounded in retrieved evidence. When the knowledge base does not contain enough information, the model should say that the context is insufficient instead of inventing an answer.
