@@ -124,11 +124,15 @@ def handle_ask(args: argparse.Namespace) -> None:
     response = pipeline.ask(
         query=args.query,
         top_k=args.top_k,
+        template_name=args.template_name,
     )
 
     print("=" * 80)
     print("PaperPilot-Lite Ask")
     print("=" * 80)
+
+    print(f"Template: {response['template_name']}")
+    print()
 
     print("Question:")
     print(response["query"])
@@ -403,6 +407,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         help="Number of retrieved chunks. Default: 5.",
+    )
+    ask_parser.add_argument(
+        "--template-name",
+        type=str,
+        default="grounded",
+        choices=["extractive", "grounded", "explainer"],
+        help="Prompt template name: extractive, grounded, or explainer. Default: grounded.",
     )
     ask_parser.add_argument(
         "--model-name",

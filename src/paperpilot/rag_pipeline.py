@@ -38,7 +38,12 @@ class RAGPipeline:
         self.max_chunk_chars = max_chunk_chars
     
 
-    def ask(self, query: str, top_k: int | None = None) -> RAGResponse:
+    def ask(
+        self,
+        query: str,
+        top_k: int | None = None,
+        template_name: str = "grounded",
+    ) -> RAGResponse:
 
         self._validate_query(query)
         
@@ -55,6 +60,7 @@ class RAGPipeline:
             search_results=search_results,
             max_context_chars=self.max_context_chars,
             max_chunk_chars=self.max_chunk_chars,
+            template_name=template_name,
         )
 
         answer = self.llm_client.generate(prompt)
@@ -67,6 +73,7 @@ class RAGPipeline:
             "sources": sources,
             "prompt": prompt,
             "search_results": search_results,
+            "template_name": template_name,
         }
     
 
