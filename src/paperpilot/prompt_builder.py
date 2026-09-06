@@ -126,7 +126,7 @@ def build_no_context_prompt(
     _validate_query(query)
     _validate_template_name(template_name)
 
-    instruction = get_template_name(template_name)
+    instruction = get_template_instruction(template_name)
 
     prompt = f"""{instruction}
 

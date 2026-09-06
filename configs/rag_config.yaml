@@ -14,6 +14,14 @@ retrieval:
   top_k: 5
   embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
   similarity: "cosine"
+  device: "cpu"
+  batch_size: 32
+  normalize_embeddings: true
+
+prompt:
+  template_name: "grounded"
+  max_context_chars: 4000
+  max_chunk_chars: 1200
 
 logging:
   log_file: "logs/app.log"

@@ -13,6 +13,8 @@ from .rag_pipeline import RAGPipeline
 from .retriever import Retriever
 from .vector_store import VectorStore
 from .evaluator import load_qa_set, evaluate_retrieval, print_evaluation_report
+from .config import AppConfig, load_config
+from .logger import get_logger, setup_logging
 
 
 def handle_ingest(args: argparse.Namespace) -> None:
@@ -162,7 +164,7 @@ def handle_ask(args: argparse.Namespace) -> None:
 
 def handle_eval(args: argparse.Namespace) -> None:
 
-    ks = args._get_kwargs
+    ks = args.ks
 
     retriever = Retriever.from_index(
         index_dir=args.index_dir,
@@ -261,8 +263,10 @@ def print_sources(sources: list[dict[str, Any]]) -> None:
         print(source_line)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(config: AppConfig | None = None) -> argparse.ArgumentParser:
     """构建命令行参数解析器。"""
+
+    config = config or load_config()
 
     parser = argparse.ArgumentParser(
         prog="paperpilot",
@@ -286,43 +290,43 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument(
         "--index-dir",
         type=str,
-        default="data/index",
+        default=config.data.index_dir,
         help="Directory to save vector index. Default: data/index.",
     )
     ingest_parser.add_argument(
         "--chunk-size",
         type=int,
-        default=500,
+        default=config.chunking.chunk_size,
         help="Chunk size in characters. Default: 500.",
     )
     ingest_parser.add_argument(
         "--overlap",
         type=int,
-        default=100,
+        default=config.chunking.overlap,
         help="Chunk overlap in characters. Default: 100.",
     )
     ingest_parser.add_argument(
         "--model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=config.retrieval.embedding_model,
         help="Sentence-transformers embedding model name.",
     )
     ingest_parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=config.retrieval.device,
         help="Device for embedding model, such as cpu or cuda. Default: cpu.",
     )
     ingest_parser.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=config.retrieval.batch_size,
         help="Embedding batch size. Default: 32.",
     )
     ingest_parser.add_argument(
         "--similarity",
         type=str,
-        default="cosine",
+        default=config.retrieval.similarity,
         choices=["cosine", "inner_product", "l2"],
         help="Similarity metric for vector store. Default: cosine.",
     )
@@ -334,7 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest_parser.set_defaults(
         func=handle_ingest,
-        normalize_embeddings=True,
+        normalize_embeddings=config.retrieval.normalize_embeddings,
     )
 
     search_parser = subparsers.add_parser(
@@ -349,31 +353,31 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument(
         "--index-dir",
         type=str,
-        default="data/index",
+        default=config.data.index_dir,
         help="Directory containing vector index. Default: data/index.",
     )
     search_parser.add_argument(
         "--top-k",
         type=int,
-        default=5,
+        default=config.retrieval.top_k,
         help="Number of search results. Default: 5.",
     )
     search_parser.add_argument(
         "--model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=config.retrieval.embedding_model,
         help="Sentence-transformers embedding model name.",
     )
     search_parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=config.retrieval.device,
         help="Device for embedding model, such as cpu or cuda. Default: cpu.",
     )
     search_parser.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=config.retrieval.batch_size,
         help="Embedding batch size. Default: 32.",
     )
     search_parser.add_argument(
@@ -384,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search_parser.set_defaults(
         func=handle_search,
-        normalize_embeddings=True,
+        normalize_embeddings=config.retrieval.normalize_embeddings,
     )
 
     ask_parser = subparsers.add_parser(
@@ -399,50 +403,50 @@ def build_parser() -> argparse.ArgumentParser:
     ask_parser.add_argument(
         "--index-dir",
         type=str,
-        default="data/index",
+        default=config.data.index_dir,
         help="Directory containing vector index. Default: data/index.",
     )
     ask_parser.add_argument(
         "--top-k",
         type=int,
-        default=5,
+        default=config.retrieval.top_k,
         help="Number of retrieved chunks. Default: 5.",
     )
     ask_parser.add_argument(
         "--template-name",
         type=str,
-        default="grounded",
+        default=config.prompt.template_name,
         choices=["extractive", "grounded", "explainer"],
         help="Prompt template name: extractive, grounded, or explainer. Default: grounded.",
     )
     ask_parser.add_argument(
         "--model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=config.retrieval.embedding_model,
         help="Sentence-transformers embedding model name.",
     )
     ask_parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=config.retrieval.device,
         help="Device for embedding model, such as cpu or cuda. Default: cpu.",
     )
     ask_parser.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=config.retrieval.batch_size,
         help="Embedding batch size. Default: 32.",
     )
     ask_parser.add_argument(
         "--max-context-chars",
         type=int,
-        default=4000,
+        default=config.prompt.max_context_chars,
         help="Maximum context characters in prompt. Default: 4000.",
     )
     ask_parser.add_argument(
         "--max-chunk-chars",
         type=int,
-        default=1200,
+        default=config.prompt.max_chunk_chars,
         help="Maximum characters per chunk in prompt. Default: 1200.",
     )
     ask_parser.add_argument(
@@ -469,7 +473,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ask_parser.set_defaults(
         func=handle_ask,
-        normalize_embeddings=True,
+        normalize_embeddings=config.retrieval.normalize_embeddings,
     )
 
     eval_parser = subparsers.add_parser(
@@ -484,7 +488,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument(
         "--index-dir",
         type=str,
-        default="data/index",
+        default=config.data.index_dir,
         help="Directory containing vector index. Default: data/index.",
     )
     eval_parser.add_argument(
@@ -497,19 +501,19 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument(
         "--model-name",
         type=str,
-        default="sentence-transformers/all-MiniLM-L6-v2",
+        default=config.retrieval.embedding_model,
         help="Sentence-transformers embedding model name.",
     )
     eval_parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=config.retrieval.device,
         help="Device for embedding model, such as cpu or cuda. Default: cpu.",
     )
     eval_parser.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=config.retrieval.batch_size,
         help="Embedding batch size. Default: 32.",
     )
     eval_parser.add_argument(
@@ -531,7 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_parser.set_defaults(
         func=handle_eval,
-        normalize_embeddings=True,
+        normalize_embeddings=config.retrieval.normalize_embeddings,
     )
 
     return parser
@@ -540,12 +544,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     """CLI 主入口。"""
 
-    parser = build_parser()
+    config = load_config()
+    setup_logging(
+        level=config.logging.level,
+        log_file=config.logging.log_file,
+    )
+    logger = get_logger("cli")
+
+    parser = build_parser(config=config)
     args = parser.parse_args()
 
     try:
+        logger.info("Running command: %s", args.command)
         args.func(args)
     except Exception as exc:
+        logger.exception("Command failed: %s", args.command)
         print()
         print("Error:")
         print(f"{type(exc).__name__}: {exc}")
