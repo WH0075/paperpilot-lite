@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
 
 from .cleaner import clean_documents
 from .chunker import chunk_documents
 from .document_loader import load_documents
 from .embedder import Embedder
-from .llm_client import MockLLMClient
+from .llm_client import BaseLLMClient, MockLLMClient, OpenAICompatibleLLMClient
 from .rag_pipeline import RAGPipeline
 from .retriever import Retriever
 from .vector_store import VectorStore
@@ -104,12 +107,36 @@ def handle_search(args: argparse.Namespace) -> None:
     print_search_results(results)
 
 
+def create_llm_client(args: argparse.Namespace) -> BaseLLMClient:
+    """Create the LLM client selected by CLI/configuration."""
+
+    if args.llm == "mock":
+        return MockLLMClient(fixed_answer=args.fixed_answer)
+
+    if args.llm == "openai-compatible":
+        if not args.llm_model:
+            raise ValueError(
+                "Real LLM mode requires a model name. Set LLM_MODEL_NAME in .env "
+                "or pass --llm-model."
+            )
+
+        return OpenAICompatibleLLMClient(
+            model_name=args.llm_model,
+            api_key=os.getenv("LLM_API_KEY"),
+            base_url=args.llm_base_url,
+            temperature=args.llm_temperature,
+            max_tokens=args.llm_max_tokens,
+            thinking_enabled=args.llm_thinking,
+            timeout=args.llm_timeout,
+        )
+
+    raise ValueError(f"Unsupported LLM provider: {args.llm}")
+
+
 def handle_ask(args: argparse.Namespace) -> None:
     """处理 ask 命令：执行完整 RAG 问答流程。"""
 
-    llm_client = MockLLMClient(
-        fixed_answer=args.fixed_answer,
-    )
+    llm_client = create_llm_client(args)
 
     pipeline = RAGPipeline.from_index(
         index_dir=args.index_dir,
@@ -450,6 +477,49 @@ def build_parser(config: AppConfig | None = None) -> argparse.ArgumentParser:
         help="Maximum characters per chunk in prompt. Default: 1200.",
     )
     ask_parser.add_argument(
+        "--llm",
+        type=str,
+        default=config.llm.provider,
+        choices=["mock", "openai-compatible"],
+        help="LLM provider. Default comes from config/.env.",
+    )
+    ask_parser.add_argument(
+        "--llm-model",
+        type=str,
+        default=config.llm.model_name,
+        help="Model name for a real OpenAI-compatible LLM.",
+    )
+    ask_parser.add_argument(
+        "--llm-base-url",
+        type=str,
+        default=config.llm.base_url,
+        help="Base URL for an OpenAI-compatible API, e.g. https://host/v1.",
+    )
+    ask_parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=config.llm.temperature,
+        help="Generation temperature. Default: 0.2.",
+    )
+    ask_parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        default=config.llm.max_tokens,
+        help="Maximum generated tokens. Default: 512.",
+    )
+    ask_parser.add_argument(
+        "--llm-thinking",
+        action="store_true",
+        default=config.llm.thinking_enabled,
+        help="Enable LLM thinking/reasoning mode.",
+    )
+    ask_parser.add_argument(
+        "--llm-timeout",
+        type=int,
+        default=config.llm.timeout,
+        help="LLM request timeout in seconds. Default: 60.",
+    )
+    ask_parser.add_argument(
         "--fixed-answer",
         type=str,
         default=None,
@@ -543,6 +613,13 @@ def build_parser(config: AppConfig | None = None) -> argparse.ArgumentParser:
 
 def main() -> None:
     """CLI 主入口。"""
+
+    project_root = Path(__file__).resolve().parents[2]
+    env_path = project_root / ".env"
+
+    # Load local secrets/config overrides before YAML + environment resolution.
+    # .env is ignored by git and should never be committed.
+    load_dotenv(dotenv_path=env_path)
 
     config = load_config()
     setup_logging(

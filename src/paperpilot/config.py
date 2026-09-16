@@ -40,6 +40,17 @@ class PromptConfig:
 
 
 @dataclass(frozen=True)
+class LLMConfig:
+    provider: str = "mock"
+    model_name: str | None = None
+    base_url: str | None = None
+    temperature: float = 0.2
+    max_tokens: int = 512
+    thinking_enabled: bool = False
+    timeout: int = 60
+
+
+@dataclass(frozen=True)
 class LoggingConfig:
     log_file: str = "logs/app.log"
     level: str = "INFO"
@@ -52,6 +63,7 @@ class AppConfig:
     chunking: ChunkingConfig = ChunkingConfig()
     retrieval: RetrievalConfig = RetrievalConfig()
     prompt: PromptConfig = PromptConfig()
+    llm: LLMConfig = LLMConfig()
     logging: LoggingConfig = LoggingConfig()
 
 
@@ -86,6 +98,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     chunking_raw = _section(raw, "chunking")
     retrieval_raw = _section(raw, "retrieval")
     prompt_raw = _section(raw, "prompt")
+    llm_raw = _section(raw, "llm")
     logging_raw = _section(raw, "logging")
 
     data = DataConfig(
@@ -151,6 +164,41 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         ),
     )
 
+
+    llm = LLMConfig(
+        provider=_env_str(
+            "LLM_PROVIDER",
+            llm_raw.get("provider", defaults.llm.provider),
+        ).lower(),
+        model_name=_env_optional_str(
+            "LLM_MODEL_NAME",
+            llm_raw.get("model_name", defaults.llm.model_name),
+        ),
+        base_url=_env_optional_str(
+            "LLM_BASE_URL",
+            llm_raw.get("base_url", defaults.llm.base_url),
+        ),
+        temperature=_env_float(
+            "LLM_TEMPERATURE",
+            llm_raw.get("temperature", defaults.llm.temperature),
+        ),
+        max_tokens=_env_int(
+            "LLM_MAX_TOKENS",
+            llm_raw.get("max_tokens", defaults.llm.max_tokens),
+        ),
+        thinking_enabled=_env_bool(
+            "LLM_THINKING_ENABLED",
+            llm_raw.get(
+                "thinking_enabled",
+                defaults.llm.thinking_enabled,
+            ),
+        ),
+        timeout=_env_int(
+            "LLM_TIMEOUT",
+            llm_raw.get("timeout", defaults.llm.timeout),
+        ),
+    )
+
     logging_config = LoggingConfig(
         log_file=_env_str(
             "PAPERPILOT_LOG_FILE",
@@ -171,6 +219,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
         chunking=chunking,
         retrieval=retrieval,
         prompt=prompt,
+        llm=llm,
         logging=logging_config,
     )
 
@@ -200,6 +249,32 @@ def _env_str(name: str, default: Any) -> str:
     if not default.strip():
         raise ValueError(f"Config value for {name} must not be empty")
     return default.strip()
+
+
+def _env_optional_str(name: str, default: Any) -> str | None:
+    value = os.getenv(name)
+    candidate = value if value is not None else default
+
+    if candidate is None:
+        return None
+    if not isinstance(candidate, str):
+        raise TypeError(f"Config value for {name} must be a string or null")
+
+    normalized = candidate.strip()
+    return normalized or None
+
+
+def _env_float(name: str, default: Any) -> float:
+    value = os.getenv(name)
+    candidate = value if value is not None else default
+
+    if isinstance(candidate, bool):
+        raise TypeError(f"Config value for {name} must be a number")
+
+    try:
+        return float(candidate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Config value for {name} must be a number: {candidate}") from exc
 
 
 def _env_int(name: str, default: Any) -> int:
@@ -253,6 +328,15 @@ def _validate_config(config: AppConfig) -> None:
         raise ValueError("max_context_chars must be positive")
     if config.prompt.max_chunk_chars <= 0:
         raise ValueError("max_chunk_chars must be positive")
+
+    if config.llm.provider not in {"mock", "openai-compatible"}:
+        raise ValueError("llm.provider must be one of: mock, openai-compatible")
+    if config.llm.temperature < 0:
+        raise ValueError("llm.temperature must be non-negative")
+    if config.llm.max_tokens <= 0:
+        raise ValueError("llm.max_tokens must be positive")
+    if config.llm.timeout <= 0:
+        raise ValueError("llm.timeout must be positive")
 
     valid_log_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
     if config.logging.level not in valid_log_levels:

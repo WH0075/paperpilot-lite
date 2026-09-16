@@ -23,6 +23,17 @@ prompt:
   max_context_chars: 4000
   max_chunk_chars: 1200
 
+llm:
+  # Keep mock as the safe default so tests and local development never make
+  # accidental paid API calls. Switch to openai-compatible through .env or CLI.
+  provider: "mock"
+  model_name: null
+  base_url: null
+  temperature: 0.2
+  max_tokens: 512
+  thinking_enabled: false
+  timeout: 60
+
 logging:
   log_file: "logs/app.log"
   level: "INFO"

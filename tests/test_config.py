@@ -33,6 +33,14 @@ prompt:
   max_context_chars: 4000
   max_chunk_chars: 1200
 
+llm:
+  provider: mock
+  model_name: null
+  base_url: null
+  temperature: 0.2
+  max_tokens: 512
+  timeout: 60
+
 logging:
   log_file: logs/app.log
   level: INFO
@@ -51,6 +59,8 @@ def test_load_config_reads_yaml(tmp_path):
     assert config.chunking.chunk_size == 500
     assert config.retrieval.top_k == 5
     assert config.prompt.template_name == "grounded"
+    assert config.llm.provider == "mock"
+    assert config.llm.model_name is None
 
 
 def test_environment_overrides_yaml(tmp_path, monkeypatch):
@@ -59,12 +69,16 @@ def test_environment_overrides_yaml(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERPILOT_TOP_K", "9")
     monkeypatch.setenv("PAPERPILOT_CHUNK_SIZE", "700")
     monkeypatch.setenv("PAPERPILOT_LOG_LEVEL", "debug")
+    monkeypatch.setenv("LLM_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("LLM_MODEL_NAME", "test-model")
 
     config = load_config(config_path)
 
     assert config.retrieval.top_k == 9
     assert config.chunking.chunk_size == 700
     assert config.logging.level == "DEBUG"
+    assert config.llm.provider == "openai-compatible"
+    assert config.llm.model_name == "test-model"
 
 
 def test_invalid_overlap_is_rejected(tmp_path):

@@ -89,3 +89,72 @@ def test_openai_compatible_client_rejects_invalid_timeout():
             api_key="fake-key",
             timeout=0,
         )
+
+def test_openai_compatible_generate_builds_chat_completion_payload(monkeypatch):
+    client = OpenAICompatibleLLMClient(
+        model_name="test-model",
+        api_key="fake-key",
+        base_url="https://example.com/v1",
+        temperature=0.3,
+        thinking_enabled=False,
+        max_tokens=123,
+    )
+    captured = {}
+
+    def fake_post_json(*, url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "Grounded answer [1]."}}]}
+
+    monkeypatch.setattr(client, "_post_json", fake_post_json)
+
+    answer = client.generate("Use only the context.")
+
+    assert answer == "Grounded answer [1]."
+    assert captured["url"] == "https://example.com/v1/chat/completions"
+    assert captured["payload"]["model"] == "test-model"
+    assert captured["payload"]["messages"][0]["content"] == "Use only the context."
+    assert captured["payload"]["temperature"] == 0.3
+    assert captured["payload"]["max_tokens"] == 123
+    assert captured["payload"]["thinking"] == {
+        "type": "disabled"
+    }
+
+def test_openai_compatible_generate_enables_thinking(
+    monkeypatch,
+):
+    client = OpenAICompatibleLLMClient(
+        model_name="test-model",
+        api_key="fake-key",
+        base_url="https://example.com/v1",
+        thinking_enabled=True,
+    )
+
+    captured = {}
+
+    def fake_post_json(*, url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "answer"
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        client,
+        "_post_json",
+        fake_post_json,
+    )
+
+    answer = client.generate("prompt")
+
+    assert answer == "answer"
+    assert captured["payload"]["thinking"] == {
+        "type": "enabled"
+    }

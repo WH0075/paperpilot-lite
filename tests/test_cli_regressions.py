@@ -1,5 +1,7 @@
 from argparse import Namespace
 
+import pytest
+
 from src.paperpilot import cli
 
 
@@ -48,3 +50,57 @@ def test_handle_eval_uses_args_ks(monkeypatch):
     cli.handle_eval(args)
 
     assert captured["ks"] == [1, 3, 5]
+
+
+def test_create_llm_client_mock():
+    args = Namespace(
+        llm="mock",
+        fixed_answer="mocked",
+        llm_model=None,
+        llm_base_url=None,
+        llm_temperature=0.2,
+        llm_max_tokens=512,
+        llm_timeout=60,
+    )
+
+    client = cli.create_llm_client(args)
+
+    assert client.generate("prompt") == "mocked"
+
+
+def test_create_llm_client_real_requires_model(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake-key")
+    args = Namespace(
+        llm="openai-compatible",
+        fixed_answer=None,
+        llm_model=None,
+        llm_base_url="https://example.com/v1",
+        llm_temperature=0.2,
+        llm_max_tokens=512,
+        llm_thinking=False,
+        llm_timeout=60,
+    )
+
+    with pytest.raises(ValueError, match="requires a model name"):
+        cli.create_llm_client(args)
+
+
+def test_create_llm_client_real(monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "fake-key")
+    args = Namespace(
+        llm="openai-compatible",
+        fixed_answer=None,
+        llm_model="test-model",
+        llm_base_url="https://example.com/v1",
+        llm_temperature=0.1,
+        llm_max_tokens=256,
+        llm_thinking=False,
+        llm_timeout=30,
+    )
+
+    client = cli.create_llm_client(args)
+
+    assert isinstance(client, cli.OpenAICompatibleLLMClient)
+    assert client.model_name == "test-model"
+    assert client.base_url == "https://example.com/v1"
+    assert client.thinking_enabled is False

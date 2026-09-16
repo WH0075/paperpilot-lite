@@ -46,6 +46,7 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         base_url: str | None = None,
         temperature: float = 0.2,
         max_tokens: int = 512,
+        thinking_enabled: bool = False,
         timeout: int = 60,
     ) -> None:
         if not isinstance(model_name, str):
@@ -58,6 +59,7 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         _validate_positive_int(max_tokens, "max_tokens")
         _validate_positive_int(timeout, "timeout")
 
+        self.thinking_enabled = thinking_enabled
         self.model_name = model_name
         self.api_key = api_key or os.getenv("LLM_API_KEY")
         self.base_url = (base_url or os.getenv("LLM_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
@@ -86,6 +88,9 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
             ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "thinking": {
+                "type": "enabled" if self.thinking_enabled else "disabled"
+            },
         }
 
         response_data = self._post_json(url=url, payload=payload)
@@ -99,7 +104,25 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
             raise TypeError("LLM answer must be a string")
 
         if not answer.strip():
-            raise ValueError("LLM answer is empty")
+            choice = response_data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            usage = response_data.get("usage", {})
+
+            finish_reason = choice.get("finish_reason")
+            reasoning_content = message.get("reasoning_content")
+
+            reasoning_length = (
+                len(reasoning_content)
+                if isinstance(reasoning_content, str)
+                else 0
+            )
+
+            raise ValueError(
+                "LLM answer is empty. "
+                f"finish_reason={finish_reason!r}, "
+                f"reasoning_content_length={reasoning_length}, "
+                f"usage={usage!r}"
+            )
 
         return answer.strip()
     
