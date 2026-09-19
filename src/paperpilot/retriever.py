@@ -5,7 +5,7 @@ from typing import Any
 
 from .embedder import Embedder
 from .vector_store import VectorStore
-
+from .keyword_retriever import KeywordRetriever
 
 SearchResult = dict[str, Any]
 
@@ -18,6 +18,10 @@ class Retriever:
         embedder: Embedder,
         vector_store: VectorStore,
         default_top_k: int = 3,
+        default_mode: str = "dense",
+        hybrid_alpha: float = 0.5,
+        fusion_method: str = "rrf",
+        rrf_k: int = 60,
     ) -> None:
         """初始化 Retriever。"""
 
@@ -27,35 +31,480 @@ class Retriever:
         if vector_store is None:
             raise ValueError("vector_store must not be None")
 
+        if default_mode not in {
+            "dense",
+            "keyword",
+            "hybrid",
+        }:
+            raise ValueError(
+                "default_mode must be one of: "
+                "dense, keyword, hybrid"
+            )
+
+        if fusion_method not in {"minmax", "rrf"}:
+            raise ValueError(
+                "fusion_method must be one of: minmax, rrf"
+            )
+
+        self._validate_rrf_k(rrf_k)
+
+        self._validate_alpha(hybrid_alpha)
+
+        self.default_mode = default_mode
+        self.hybrid_alpha = hybrid_alpha
+        self.fusion_method = fusion_method
+        self.rrf_k = rrf_k
+
         self._validate_top_k(default_top_k)
 
         self.embedder = embedder
         self.vector_store = vector_store
-        self.default_top_k = default_top_k    
+        self.default_top_k = default_top_k
+
+        self.keyword_retriever = KeywordRetriever(
+            vector_store.chunks
+        )
+
+    def _retrieve_dense(
+        self,
+        query: str,
+        top_k: int,
+    ) -> list[SearchResult]:
+        """使用向量相似度执行 dense retrieval。"""
+
+        query_embedding = self.embedder.embed_text(query)
+
+        return self.vector_store.search(
+            query_embedding=query_embedding,
+            top_k=top_k,
+        )
+
+    @staticmethod
+    def _normalize_scores(
+        results: list[SearchResult],
+    ) -> dict[int, float]:
+        """Min-max normalize retrieval scores into [0, 1]."""
+
+        if not results:
+            return {}
+
+        scores = [
+            float(result["score"])
+            for result in results
+        ]
+
+        min_score = min(scores)
+        max_score = max(scores)
+
+        if max_score == min_score:
+            normalized_value = (
+                0.0
+                if max_score == 0
+                else 1.0
+            )
+
+            return {
+                int(result["index"]): normalized_value
+                for result in results
+            }
+
+        return {
+            int(result["index"]): (
+                float(result["score"]) - min_score
+            )
+            / (
+                max_score - min_score
+            )
+            for result in results
+        }
+
+    def _retrieve_keyword(
+        self,
+        query: str,
+        top_k: int,
+    ) -> list[SearchResult]:
+        """使用 BM25 执行 keyword retrieval。"""
+
+        return self.keyword_retriever.retrieve(
+            query=query,
+            top_k=top_k,
+        )
 
 
-    def retrieve(self, query: str, top_k: int | None = None) -> list[SearchResult]:
-        """根据用户 query 检索最相关的 chunks。"""
+    def _retrieve_hybrid_minmax(
+        self,
+        query: str,
+        top_k: int,
+        alpha: float,
+    ) -> list[SearchResult]:
+        """Combine dense and keyword retrieval with normalized weighted fusion."""
+
+        candidate_k = min(
+            top_k * 4,
+            len(self.vector_store.chunks),
+        )
+
+        dense_results = self._retrieve_dense(
+            query=query,
+            top_k=candidate_k,
+        )
+
+        keyword_results = self._retrieve_keyword(
+            query=query,
+            top_k=candidate_k,
+        )
+
+        keyword_results = [
+            result
+            for result in keyword_results
+            if float(result["score"]) > 0
+        ]
+
+        dense_normalized = self._normalize_scores(
+            dense_results
+        )
+
+        keyword_normalized = self._normalize_scores(
+            keyword_results
+        )
+
+        dense_by_index = {
+            int(result["index"]): result
+            for result in dense_results
+        }
+
+        keyword_by_index = {
+            int(result["index"]): result
+            for result in keyword_results
+        }
+
+        candidate_indices = (
+            set(dense_by_index)
+            | set(keyword_by_index)
+        )
+
+        hybrid_results: list[SearchResult] = []
+
+        for index in candidate_indices:
+            dense_result = dense_by_index.get(index)
+            keyword_result = keyword_by_index.get(index)
+
+            base_result = (
+                dense_result
+                if dense_result is not None
+                else keyword_result
+            )
+
+            if base_result is None:
+                continue
+
+            dense_score_normalized = (
+                dense_normalized.get(index, 0.0)
+            )
+
+            keyword_score_normalized = (
+                keyword_normalized.get(index, 0.0)
+            )
+
+            hybrid_score = (
+                alpha * dense_score_normalized
+                + (1.0 - alpha)
+                * keyword_score_normalized
+            )
+
+            hybrid_results.append(
+                {
+                    "text": base_result["text"],
+                    "metadata": dict(
+                        base_result.get("metadata", {})
+                    ),
+                    "index": index,
+                    "score": float(hybrid_score),
+                    "dense_score": (
+                        float(dense_result["score"])
+                        if dense_result is not None
+                        else None
+                    ),
+                    "keyword_score": (
+                        float(keyword_result["score"])
+                        if keyword_result is not None
+                        else None
+                    ),
+                    "dense_score_normalized": float(
+                        dense_score_normalized
+                    ),
+                    "keyword_score_normalized": float(
+                        keyword_score_normalized
+                    ),
+                }
+            )
+
+        hybrid_results.sort(
+            key=lambda result: result["score"],
+            reverse=True,
+        )
+
+        return hybrid_results[:top_k]
+
+
+    def _retrieve_hybrid_rrf(
+        self,
+        query: str,
+        top_k: int,
+        alpha: float,
+        rrf_k: int = 60,
+    ) -> list[SearchResult]:
+        """Combine dense and keyword rankings with weighted RRF."""
+
+        candidate_k = min(
+            top_k * 4,
+            len(self.vector_store.chunks),
+        )
+
+        dense_results = self._retrieve_dense(
+            query=query,
+            top_k=candidate_k,
+        )
+
+        keyword_results = self._retrieve_keyword(
+            query=query,
+            top_k=candidate_k,
+        )
+
+        keyword_results = [
+            result
+            for result in keyword_results
+            if float(result["score"]) > 0
+        ]
+
+        dense_by_index = {
+            int(result["index"]): result
+            for result in dense_results
+        }
+
+        keyword_by_index = {
+            int(result["index"]): result
+            for result in keyword_results
+        }
+
+        dense_ranks = {
+            int(result["index"]): rank
+            for rank, result in enumerate(
+                dense_results,
+                start=1,
+            )
+        }
+
+        keyword_ranks = {
+            int(result["index"]): rank
+            for rank, result in enumerate(
+                keyword_results,
+                start=1,
+            )
+        }
+
+        candidate_indices = (
+            set(dense_by_index)
+            | set(keyword_by_index)
+        )
+
+        hybrid_results: list[SearchResult] = []
+
+        for index in candidate_indices:
+            dense_result = dense_by_index.get(index)
+            keyword_result = keyword_by_index.get(index)
+
+            base_result = (
+                dense_result
+                if dense_result is not None
+                else keyword_result
+            )
+
+            if base_result is None:
+                continue
+
+            dense_rank = dense_ranks.get(index)
+            keyword_rank = keyword_ranks.get(index)
+
+            dense_rrf_score = (
+                alpha / (rrf_k + dense_rank)
+                if dense_rank is not None
+                else 0.0
+            )
+
+            keyword_rrf_score = (
+                (1.0 - alpha)
+                / (rrf_k + keyword_rank)
+                if keyword_rank is not None
+                else 0.0
+            )
+
+            hybrid_score = (
+                dense_rrf_score
+                + keyword_rrf_score
+            )
+
+            hybrid_results.append(
+                {
+                    "text": base_result["text"],
+                    "metadata": dict(
+                        base_result.get("metadata", {})
+                    ),
+                    "index": index,
+                    "score": float(hybrid_score),
+                    "dense_score": (
+                        float(dense_result["score"])
+                        if dense_result is not None
+                        else None
+                    ),
+                    "keyword_score": (
+                        float(keyword_result["score"])
+                        if keyword_result is not None
+                        else None
+                    ),
+                    "dense_rank": dense_rank,
+                    "keyword_rank": keyword_rank,
+                    "dense_rrf_score": float(
+                        dense_rrf_score
+                    ),
+                    "keyword_rrf_score": float(
+                        keyword_rrf_score
+                    ),
+                }
+            )
+
+        hybrid_results.sort(
+            key=lambda result: result["score"],
+            reverse=True,
+        )
+
+        return hybrid_results[:top_k]
+
+
+    def _retrieve_hybrid(
+        self,
+        query: str,
+        top_k: int,
+        alpha: float,
+        fusion_method: str,
+        rrf_k: int,
+    ) -> list[SearchResult]:
+        """Dispatch to the selected hybrid fusion strategy."""
+
+        if fusion_method == "minmax":
+            return self._retrieve_hybrid_minmax(
+                query=query,
+                top_k=top_k,
+                alpha=alpha,
+            )
+
+        if fusion_method == "rrf":
+            return self._retrieve_hybrid_rrf(
+                query=query,
+                top_k=top_k,
+                alpha=alpha,
+                rrf_k=rrf_k,
+            )
+
+        raise ValueError(
+            "fusion_method must be one of: "
+            "minmax, rrf"
+        )
+
+
+
+    def retrieve(
+        self,
+        query: str,
+        top_k: int | None = None,
+        mode: str | None = None,
+        alpha: float | None = None,
+        fusion_method: str | None = None,
+        rrf_k: int | None = None,
+    ) -> list[SearchResult]:
+        """根据用户 query 和 retrieval mode 检索最相关的 chunks。"""
 
         self._validate_query(query)
 
         k = self.default_top_k if top_k is None else top_k
         self._validate_top_k(k)
 
-        query_embedding = self.embedder.embed_text(query)
+        selected_mode = self.default_mode if mode is None else mode
 
-        results = self.vector_store.search(
-            query_embedding=query_embedding,
-            top_k=k,
+        if selected_mode == "dense":
+            return self._retrieve_dense(
+                query=query,
+                top_k=k,
+            )
+
+        if selected_mode == "keyword":
+            return self._retrieve_keyword(
+                query=query,
+                top_k=k,
+            )
+
+        if selected_mode == "hybrid":
+            selected_alpha = (
+                self.hybrid_alpha
+                if alpha is None
+                else alpha
+            )
+
+            selected_fusion_method = (
+                self.fusion_method
+                if fusion_method is None
+                else fusion_method
+            )
+
+            selected_rrf_k = (
+                self.rrf_k
+                if rrf_k is None
+                else rrf_k
+            )
+
+            self._validate_alpha(selected_alpha)
+
+            if selected_fusion_method not in {
+                "minmax",
+                "rrf",
+            }:
+                raise ValueError(
+                    "fusion_method must be one of: "
+                    "minmax, rrf"
+                )
+
+            self._validate_rrf_k(selected_rrf_k)
+
+            return self._retrieve_hybrid(
+                query=query,
+                top_k=k,
+                alpha=selected_alpha,
+                fusion_method=selected_fusion_method,
+                rrf_k=selected_rrf_k,
+            )
+
+        raise ValueError(
+            "mode must be one of: "
+            "dense, keyword, hybrid"
         )
 
-        return results
 
-
-    def retrieve_texts(self, query: str, top_k: int | None = None) -> list[str]:
+    def retrieve_texts(
+        self,
+        query: str,
+        top_k: int | None = None,
+        mode: str | None = None,
+        alpha: float | None = None,
+    ) -> list[str]:
         """只返回检索结果中的文本内容。"""
 
-        results = self.retrieve(query=query, top_k=top_k)
+        results = self.retrieve(
+            query=query,
+            top_k=top_k,
+            mode=mode,
+            alpha=alpha,
+
+        )
 
         return [result["text"] for result in results]
 
@@ -64,11 +513,18 @@ class Retriever:
         self,
         query: str,
         top_k: int | None = None,
+        mode: str | None = None,
+        alpha: float | None = None,
     ) -> list[SearchResult]:
         """返回带来源信息的检索结果。"""
 
-        return self.retrieve(query=query, top_k=top_k)
-    
+        return self.retrieve(
+            query=query,
+            top_k=top_k,
+            mode=mode,
+            alpha=alpha,
+        )
+
 
     @classmethod
     def from_index(
@@ -79,6 +535,10 @@ class Retriever:
         normalize_embeddings: bool = True,
         batch_size: int = 32,
         default_top_k: int = 3,
+        default_mode: str = "dense",
+        hybrid_alpha: float = 0.5,
+        fusion_method: str = "rrf",
+        rrf_k: int = 60,
     ) -> "Retriever":
         """从已经保存的向量索引目录创建 Retriever。"""
 
@@ -95,16 +555,20 @@ class Retriever:
             embedder=embedder,
             vector_store=vector_store,
             default_top_k=default_top_k,
+            default_mode=default_mode,
+            hybrid_alpha=hybrid_alpha,
+            fusion_method=fusion_method,
+            rrf_k=rrf_k,
         )
 
-       
+
     @staticmethod
     def _validate_query(query: str) -> None:
         """检查 query 是否合法。"""
 
         if not isinstance(query,str):
             raise TypeError("query must be a string")
-        
+
         if not query.strip():
             raise ValueError("query must not be empty")
 
@@ -115,8 +579,35 @@ class Retriever:
 
         if not isinstance(top_k, int):
             raise TypeError("top_k must be an integer")
-        
+
         if top_k <= 0:
             raise ValueError("top_k must be positive")
 
-        
+    @staticmethod
+    def _validate_alpha(alpha: float) -> None:
+        """检查 hybrid fusion 权重是否合法。"""
+
+        if not isinstance(alpha, (int, float)):
+            raise TypeError(
+                "alpha must be a number"
+            )
+
+        if not 0.0 <= float(alpha) <= 1.0:
+            raise ValueError(
+                "alpha must be between 0 and 1"
+            )
+
+
+    @staticmethod
+    def _validate_rrf_k(rrf_k: int) -> None:
+        """检查 RRF rank constant 是否合法。"""
+
+        if not isinstance(rrf_k, int):
+            raise TypeError(
+                "rrf_k must be an integer"
+            )
+
+        if rrf_k <= 0:
+            raise ValueError(
+                "rrf_k must be positive"
+            )

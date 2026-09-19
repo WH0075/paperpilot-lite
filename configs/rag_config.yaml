@@ -12,6 +12,24 @@ chunking:
 
 retrieval:
   top_k: 5
+
+  # Retrieval strategy:
+  # dense | keyword | hybrid
+  mode: "hybrid"
+
+  # Hybrid retrieval configuration.
+  # alpha controls the dense contribution:
+  # 1.0 = dense only
+  # 0.0 = keyword only
+  hybrid_alpha: 0.5
+
+  # minmax | rrf
+  fusion_method: "rrf"
+
+  # Reciprocal Rank Fusion smoothing constant.
+  rrf_k: 60
+
+  # Dense retrieval configuration.
   embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
   similarity: "cosine"
   device: "cpu"
@@ -24,8 +42,8 @@ prompt:
   max_chunk_chars: 1200
 
 llm:
-  # Keep mock as the safe default so tests and local development never make
-  # accidental paid API calls. Switch to openai-compatible through .env or CLI.
+  # Keep mock as the safe default so tests and local development
+  # never make accidental paid API calls.
   provider: "mock"
   model_name: null
   base_url: null

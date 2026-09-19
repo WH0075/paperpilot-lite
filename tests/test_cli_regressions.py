@@ -45,6 +45,12 @@ def test_handle_eval_uses_args_ks(monkeypatch):
         qa_path="data/eval/qa_set.jsonl",
         show_failed_cases=False,
         max_failed_cases=10,
+
+        # R3 retrieval configuration
+        retrieval_mode="hybrid",
+        hybrid_alpha=0.5,
+        fusion_method="rrf",
+        rrf_k=60,
     )
 
     cli.handle_eval(args)
