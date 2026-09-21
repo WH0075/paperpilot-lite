@@ -5,9 +5,13 @@
 本次基准测试的主要目标包括：
 
 - 在严格证据块级标签下评估检索质量；
+
 - 对比 Dense、BM25 与 Hybrid 三类检索方法；
+
 - 分析不同融合方法的效果差异；
+
 - 分析 Hybrid 检索中关键超参数的敏感性；
+
 - 为后续 R5 的 Reranker（重排序器）实验建立稳定、可复现的检索基线。
 
 ---
@@ -19,18 +23,27 @@
 本次基准测试语料库包含 8 篇与检索增强生成、稠密检索以及 Agent 系统相关的公开论文：
 
 - `rag_2005.11401v4.pdf`
+
 - `dpr_2004.04906v3.pdf`
+
 - `colbert_2004.12832v2.pdf`
+
 - `fid_2007.01282v2.pdf`
+
 - `hyde_2212.10496v1.pdf`
+
 - `react_2210.03629v3.pdf`
+
 - `self_rag_2310.11511v1.pdf`
+
 - `toolformer_2302.04761v1.pdf`
 
 经过预处理与文本切分后，正式 benchmark index（基准索引）包含：
 
 - 8 篇论文；
+
 - 1376 个 chunk（文本块）；
+
 - 64 条评测 query（查询）。
 
 基准语料目录：
@@ -97,7 +110,7 @@ expected_chunk_ids
 当前 benchmark 的 chunk ID 采用：
 
 ```text
-文件名:页码:chunk编号
+文件名:页码\:chunk编号
 ```
 
 例如：
@@ -253,7 +266,9 @@ P95
 其中：
 
 - Mean：平均检索耗时；
+
 - P50：中位数附近的典型耗时；
+
 - P95：尾部延迟，即约 95% 的 query 会在该时间内完成。
 
 当前 latency 主要用于比较不同方法的耗时量级，单次运行中几毫秒级的细小差异不应被过度解读。
@@ -274,28 +289,43 @@ rrf_k = 60
 ### 4.1 检索质量结果
 
 | 方法 | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+
 |---|---:|---:|---:|---:|
+
 | Dense | 0.2188 | 0.4375 | 0.5625 | 0.3432 |
+
 | BM25 | 0.2969 | 0.6094 | **0.7656** | 0.4638 |
+
 | Hybrid Min-Max | 0.3438 | 0.6406 | **0.7656** | 0.4977 |
+
 | Hybrid RRF | **0.3594** | **0.6562** | 0.7500 | **0.5052** |
 
 对应的命中 query 数量为：
 
 | 方法 | Recall@1 | Recall@3 | Recall@5 |
+
 |---|---:|---:|---:|
+
 | Dense | 14 / 64 | 28 / 64 | 36 / 64 |
+
 | BM25 | 19 / 64 | 39 / 64 | 49 / 64 |
+
 | Hybrid Min-Max | 22 / 64 | 41 / 64 | 49 / 64 |
+
 | Hybrid RRF | 23 / 64 | 42 / 64 | 48 / 64 |
 
 ### 4.2 检索延迟结果
 
 | 方法 | Mean | P50 | P95 |
+
 |---|---:|---:|---:|
+
 | Dense | 105.33 ms | 103.79 ms | 113.56 ms |
+
 | BM25 | 4.25 ms | 4.18 ms | 6.20 ms |
+
 | Hybrid Min-Max | 104.03 ms | 103.45 ms | 117.38 ms |
+
 | Hybrid RRF | 101.53 ms | 103.02 ms | 116.75 ms |
 
 Dense 和 Hybrid 之间几毫秒的差异不应解释为 Hybrid 比 Dense 更快，因为 Hybrid 实际上同时运行了 Dense 与 BM25，再进行融合。
@@ -357,10 +387,8 @@ Hybrid Min-Max 的 Recall@5 为 0.7656，而 Hybrid RRF 为 0.7500。
 ```text
 RRF Recall@1 = 0.3594
 Min-Max       = 0.3438
-
 RRF Recall@3 = 0.6562
 Min-Max       = 0.6406
-
 RRF MRR@5    = 0.5052
 Min-Max       = 0.4977
 ```
@@ -418,11 +446,9 @@ hybrid_alpha
 alpha = 0.3
 Dense 权重 = 30%
 BM25 权重  = 70%
-
 alpha = 0.5
 Dense 权重 = 50%
 BM25 权重  = 50%
-
 alpha = 0.7
 Dense 权重 = 70%
 BM25 权重  = 30%
@@ -431,17 +457,25 @@ BM25 权重  = 30%
 ### 7.2 实验结果
 
 | Alpha | Dense 权重 | BM25 权重 | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+
 |---:|---:|---:|---:|---:|---:|---:|
+
 | 0.3 | 0.3 | 0.7 | 0.3281 | **0.6719** | 0.7344 | 0.5018 |
+
 | 0.5 | 0.5 | 0.5 | **0.3594** | 0.6562 | **0.7500** | **0.5052** |
+
 | 0.7 | 0.7 | 0.3 | 0.3438 | 0.5312 | **0.7500** | 0.4745 |
 
 对应的 Recall 命中数量：
 
 | Alpha | Recall@1 | Recall@3 | Recall@5 |
+
 |---:|---:|---:|---:|
+
 | 0.3 | 21 / 64 | 43 / 64 | 47 / 64 |
+
 | 0.5 | 23 / 64 | 42 / 64 | 48 / 64 |
+
 | 0.7 | 22 / 64 | 34 / 64 | 48 / 64 |
 
 ### 7.3 Alpha 消融分析
@@ -497,17 +531,25 @@ rrf_k
 ### 8.2 实验结果
 
 | RRF k | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+
 |---:|---:|---:|---:|---:|
+
 | 20 | 0.3594 | **0.6562** | 0.7500 | **0.5052** |
+
 | 40 | 0.3594 | 0.6406 | 0.7500 | 0.5013 |
+
 | 60 | 0.3594 | **0.6562** | 0.7500 | **0.5052** |
 
 对应的 Recall 命中数量：
 
 | RRF k | Recall@1 | Recall@3 | Recall@5 |
+
 |---:|---:|---:|---:|
+
 | 20 | 23 / 64 | 42 / 64 | 48 / 64 |
+
 | 40 | 23 / 64 | 41 / 64 | 48 / 64 |
+
 | 60 | 23 / 64 | 42 / 64 | 48 / 64 |
 
 ### 8.3 RRF k 消融分析
@@ -851,3 +893,649 @@ P95 Latency
 ```
 
 最终判断：Reranker 带来的排序收益，是否值得额外的计算成本。
+
+---
+
+# R5：Cross-Encoder Reranker 与两阶段检索
+
+## 1. 实验目的
+
+R4 已经完成 Dense Retrieval、BM25 和 Hybrid RRF 的实现与评测。
+
+在正式 benchmark 上，Hybrid RRF 的结果为：
+
+| Method | Recall@1 | Recall@3 | Recall@5 | MRR@5 |
+|---|---:|---:|---:|---:|
+| Hybrid RRF | 0.3594 | 0.6562 | 0.7500 | 0.5052 |
+
+虽然 Hybrid RRF 的 Recall@5 达到 75%，但 Recall@1 只有约 36%。
+
+这表明相当一部分正确证据已经被 Retriever 召回，但没有排在较靠前的位置。
+
+因此 R5 引入第二阶段 Cross-Encoder Reranker（交叉编码重排序器）。它的目标不是重新搜索整个知识库，而是对第一阶段已经召回的一小批候选 chunk 重新计算 Query-Chunk relevance（查询-文本块相关性），并重新排序。
+
+整体流程为：
+
+```text
+Corpus
+  ↓
+Dense + BM25
+  ↓
+Hybrid RRF
+  ↓
+Candidate Top-K
+  ↓
+Cross-Encoder Reranker
+  ↓
+Final Top-K
+  ↓
+LLM
+```
+
+这种结构属于 Two-Stage Retrieval（两阶段检索）：
+
+1. 第一阶段 Retriever 负责快速召回；
+2. 第二阶段 Reranker 负责精细排序。
+
+---
+
+## 2. Hybrid Candidate Pool 修正
+
+R4 初始版本中，Hybrid 内部使用：
+
+```python
+candidate_k = top_k * 4
+```
+
+这会导致最终请求的 `top_k` 改变时，参与 RRF 融合的 Dense/BM25 候选集合也同时改变。
+
+例如：
+
+```text
+top_k = 5
+→ Dense Top-20 + BM25 Top-20
+
+top_k = 20
+→ Dense Top-80 + BM25 Top-80
+```
+
+因此请求 Top-20 时，前 5 名可能和直接请求 Top-5 时不同，产生 ranking prefix inconsistency（排名前缀不一致）。
+
+R5 将 Hybrid 内部候选深度独立为：
+
+```text
+hybrid_candidate_k
+```
+
+默认：
+
+```text
+hybrid_candidate_k = 20
+```
+
+此时：
+
+```text
+Hybrid Top-5:
+Dense Top-20
++
+BM25 Top-20
+→ RRF
+→ Top-5
+```
+
+而：
+
+```text
+Hybrid Top-20:
+Dense Top-20
++
+BM25 Top-20
+→ RRF
+→ Top-20
+```
+
+二者使用同一套融合候选，因此前部排名保持一致。
+
+修正后，R4 的正式基线得到完整恢复：
+
+| Metric | Result |
+|---|---:|
+| Recall@1 | 0.3594 (23/64) |
+| Recall@3 | 0.6562 (42/64) |
+| Recall@5 | 0.7500 (48/64) |
+| MRR@5 | 0.5052 |
+
+---
+
+## 3. Candidate Pool 上限分析
+
+在加入 Reranker 前，首先评估 Hybrid RRF 更深位置上的召回能力。
+
+配置：
+
+```text
+mode = hybrid
+fusion_method = rrf
+hybrid_alpha = 0.5
+rrf_k = 60
+hybrid_candidate_k = 20
+```
+
+结果：
+
+| Metric | Result |
+|---|---:|
+| Recall@1 | 0.3594 (23/64) |
+| Recall@3 | 0.6562 (42/64) |
+| Recall@5 | 0.7500 (48/64) |
+| Recall@10 | 0.8125 (52/64) |
+| Recall@20 | 0.9062 (58/64) |
+| MRR@5 | 0.5052 |
+
+从 Top-5 到 Top-20：
+
+```text
+48 → 58
+```
+
+增加了 10 条命中。
+
+也就是说，有：
+
+```text
+10 / 64 = 15.625%
+```
+
+的 query，其 gold evidence 已经存在于 Hybrid Top-20 中，但没有进入 Top-5。
+
+因此，在 `candidate_k=20` 的条件下，一个理想 Reranker 的最终 Recall@5 理论上限由第一阶段 Recall@20 限制：
+
+```text
+Recall@5 upper bound ≈ Recall@20 = 90.62%
+```
+
+这说明当前 Retriever 已经能够提供具有实际价值的 Candidate Pool（候选池），Reranker 存在明确的优化空间。
+
+---
+
+## 4. Cross-Encoder Reranker
+
+R5 使用：
+
+```text
+cross-encoder/ms-marco-MiniLM-L-6-v2
+```
+
+作为第一版 Cross-Encoder Reranker。
+
+Dense Retriever 属于 Bi-Encoder（双编码器）思路：
+
+```text
+Query → Query Embedding
+Chunk → Chunk Embedding
+          ↓
+     Similarity
+```
+
+Query 和 Chunk 可以分别编码，因此 chunk embedding 能够提前离线计算，查询速度较快。
+
+Cross-Encoder 则将：
+
+```text
+Query + Chunk
+```
+
+共同输入 Transformer：
+
+```text
+(Query, Chunk)
+      ↓
+Cross-Encoder
+      ↓
+Relevance Score
+```
+
+这种方式能够直接建模 Query token 与 Chunk token 之间的交互，因此更适合精细排序，但推理成本也明显更高。
+
+Reranker 输出中保留两个分数：
+
+```text
+retrieval_score
+rerank_score
+```
+
+其中：
+
+- `retrieval_score`：第一阶段 Hybrid RRF 的排序分数；
+- `rerank_score`：Cross-Encoder 重新计算的相关性分数；
+- 最终 `score` 使用 `rerank_score`。
+
+这样可以在 error analysis（错误分析）中观察第一阶段排序和第二阶段排序之间的变化。
+
+---
+
+## 5. Reranker Smoke Test
+
+使用查询：
+
+```text
+What search procedure finds RAG's top-K latent documents?
+```
+
+在 Hybrid RRF 的 Candidate Pool 中，存在直接给出答案的 chunk：
+
+```text
+For query x, we use Maximum Inner Product Search (MIPS)
+to find the top-K documents zi.
+```
+
+开启：
+
+```text
+reranker_candidate_k = 20
+```
+
+后，Cross-Encoder 对 Hybrid Top-20 重新排序，并将包含 MIPS 的正确证据提升到最终 Top-5。
+
+这验证了真实链路：
+
+```text
+Hybrid Top-20
+→ Cross-Encoder
+→ Final Top-5
+```
+
+能够正常工作。
+
+CLI 输出同时成功保留：
+
+```text
+retrieval_score
+rerank_score
+```
+
+说明第一阶段和第二阶段排序信息均可用于后续分析。
+
+---
+
+## 6. 正式 Reranker Benchmark
+
+Benchmark：
+
+```text
+64 queries
+1376 chunks
+strict expected_chunk_ids
+CPU inference
+```
+
+Hybrid 固定配置：
+
+```text
+mode = hybrid
+fusion_method = rrf
+hybrid_alpha = 0.5
+rrf_k = 60
+hybrid_candidate_k = 20
+```
+
+Reranker：
+
+```text
+cross-encoder/ms-marco-MiniLM-L-6-v2
+device = cpu
+batch_size = 16
+```
+
+### 6.1 Hybrid RRF Baseline
+
+| Metric | Result |
+|---|---:|
+| Recall@1 | 0.3594 (23/64) |
+| Recall@3 | 0.6562 (42/64) |
+| Recall@5 | 0.7500 (48/64) |
+| MRR@5 | 0.5052 |
+| Mean latency | 107.80 ms |
+| P50 latency | 105.55 ms |
+| P95 latency | 123.32 ms |
+
+### 6.2 Hybrid + Reranker，candidate_k = 20
+
+| Metric | Result |
+|---|---:|
+| Recall@1 | 0.4844 (31/64) |
+| Recall@3 | 0.6875 (44/64) |
+| Recall@5 | 0.8125 (52/64) |
+| MRR@5 | 0.6060 |
+| Mean latency | 636.31 ms |
+| P50 latency | 596.86 ms |
+| P95 latency | 867.89 ms |
+
+相对于 Hybrid baseline：
+
+```text
+Recall@1:
+23/64 → 31/64
++8 queries
++12.50 percentage points
+
+Recall@3:
+42/64 → 44/64
++2 queries
++3.13 percentage points
+
+Recall@5:
+48/64 → 52/64
++4 queries
++6.25 percentage points
+
+MRR@5:
+0.5052 → 0.6060
++0.1008
+约 +20.0%
+```
+
+Cross-Encoder 对 early-ranking quality（前部排序质量）的改善尤其明显。
+
+但平均 retrieval latency：
+
+```text
+107.80 ms → 636.31 ms
+```
+
+约增加到 baseline 的 5.9 倍。
+
+因此 Reranker 带来了明显的质量提升，同时也产生了较大的 CPU 推理成本。
+
+---
+
+## 7. Reranker Candidate-K 消融实验
+
+为了研究 Candidate Pool 大小对质量和延迟的影响，进一步比较：
+
+```text
+candidate_k = 10
+candidate_k = 20
+```
+
+实验结果：
+
+| Method | Recall@1 | Recall@3 | Recall@5 | MRR@5 | Mean ms | P50 ms | P95 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Hybrid RRF | 0.3594 | 0.6562 | 0.7500 | 0.5052 | 107.80 | 105.55 | 123.32 |
+| + Reranker, k=10 | 0.5000 | 0.6875 | 0.7812 | 0.6068 | 353.91 | 336.05 | 450.55 |
+| + Reranker, k=20 | 0.4844 | 0.6875 | 0.8125 | 0.6060 | 636.31 | 596.86 | 867.89 |
+
+### 7.1 candidate_k = 10
+
+相对于 baseline：
+
+```text
+Recall@1:
+23 → 32
++14.06 percentage points
+
+Recall@3:
+42 → 44
++3.13 percentage points
+
+Recall@5:
+48 → 50
++3.12 percentage points
+
+MRR@5:
+0.5052 → 0.6068
+约 +20.1%
+```
+
+平均延迟：
+
+```text
+107.80 ms → 353.91 ms
+```
+
+约为 baseline 的 3.28 倍。
+
+### 7.2 candidate_k = 20
+
+与 `candidate_k=10` 相比：
+
+```text
+Recall@1:
+0.5000 → 0.4844
+略微下降
+
+Recall@3:
+0.6875 → 0.6875
+不变
+
+Recall@5:
+0.7812 → 0.8125
++3.13 percentage points
+
+MRR@5:
+0.6068 → 0.6060
+基本不变
+```
+
+但平均延迟：
+
+```text
+353.91 ms → 636.31 ms
+```
+
+增加约 80%。
+
+因此，更大的 Candidate Pool 主要提升了 Recall@5，而没有进一步改善 Recall@1 或 MRR@5，并且带来了显著更高的 CPU 推理成本。
+
+---
+
+## 8. Candidate Pool 利用率
+
+第一阶段 Hybrid：
+
+```text
+Recall@10 = 52/64
+```
+
+使用：
+
+```text
+reranker_candidate_k = 10
+```
+
+后：
+
+```text
+Final Recall@5 = 50/64
+```
+
+由于 Reranker 只能处理第一阶段 Top-10，因此最终命中的 50 条一定来自这 52 条候选命中 query。对应：
+
+```text
+50 / 52 ≈ 96.2%
+```
+
+对于 Top-20：
+
+```text
+Candidate Recall@20 = 58/64
+Final Recall@5      = 52/64
+```
+
+对应：
+
+```text
+52 / 58 ≈ 89.7%
+```
+
+扩大 Candidate Pool 能提供更多潜在正确证据，但同时增加了需要 Cross-Encoder 区分的竞争候选。因此，更大的 Candidate Pool 并不必然改善最前部排序。
+
+---
+
+## 9. 最终默认配置
+
+综合 Recall、MRR 和 CPU latency，R5 选择：
+
+```yaml
+retrieval:
+  mode: "hybrid"
+  hybrid_alpha: 0.5
+  fusion_method: "rrf"
+  rrf_k: 60
+  hybrid_candidate_k: 20
+
+  reranker:
+    enabled: false
+    model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    candidate_k: 10
+    device: "cpu"
+    batch_size: 16
+```
+
+Reranker 默认关闭，以避免所有普通检索请求自动承担额外 Cross-Encoder 推理成本。
+
+当用户显式开启 Reranker 时，默认采用：
+
+```text
+candidate_k = 10
+```
+
+作为质量与延迟之间的折中配置。
+
+如果应用场景更重视 Recall@5，而能够接受更高延迟，则可以将：
+
+```text
+candidate_k = 20
+```
+
+作为高召回配置使用。
+
+---
+
+## 10. R5 结论
+
+R5 的主要结论如下：
+
+1. Hybrid RRF 已经具有较高的 Candidate Recall，但前部排序仍存在明显优化空间。
+2. Cross-Encoder Reranker 能够有效重新排序第一阶段候选，显著改善 Recall@1 和 MRR@5。
+3. `candidate_k=20` 将 Recall@5 从 75.00% 提升到 81.25%，但 CPU 平均延迟从约 108 ms 增加到约 636 ms。
+4. `candidate_k=10` 将 Recall@1 提升到 50.00%，MRR@5 提升到 0.6068，同时平均延迟控制在约 354 ms。
+5. `candidate_k=10` 与 `candidate_k=20` 的 MRR 基本相同，而后者平均延迟高约 80%。
+6. 因此 PaperPilot-Lite 默认将 Reranker 设置为可选功能，并选择 `candidate_k=10` 作为默认的质量—延迟折中配置。
+7. Reranker 无法解决第一阶段 Candidate Pool 中完全没有 gold evidence 的 query，因此检索质量仍然受到第一阶段 Retriever Recall 上限约束。
+
+---
+
+## 11. R5 已完成能力
+
+完成 R5 后，PaperPilot-Lite 的 retrieval pipeline 已支持：
+
+```text
+Dense Retrieval
+        +
+BM25 Retrieval
+        ↓
+Hybrid Fusion
+  ├── Min-Max
+  └── Weighted RRF
+        ↓
+Candidate Pool
+        ↓
+Optional Cross-Encoder Reranker
+        ↓
+Final Top-K
+        ↓
+RAG Generation
+```
+
+系统同时支持：
+
+- Dense / BM25 / Hybrid 三种检索模式；
+- Min-Max / RRF 两种 Hybrid fusion；
+- 独立 Hybrid candidate depth；
+- 可选 Cross-Encoder Reranker；
+- 可配置 Reranker candidate depth；
+- Recall@K；
+- MRR@K；
+- Mean / P50 / P95 latency；
+- strict chunk-level gold evidence evaluation；
+- CLI / YAML / environment variable 配置。
+
+---
+
+## 12. R5 复现命令
+
+### 12.1 Hybrid RRF Baseline
+
+```bash
+python -m src.paperpilot.cli eval \
+  data/eval/papers_qa_set.jsonl \
+  --index-dir data/benchmark/index \
+  --retrieval-mode hybrid \
+  --fusion-method rrf \
+  --hybrid-alpha 0.5 \
+  --rrf-k 60 \
+  --hybrid-candidate-k 20 \
+  --no-reranker \
+  --ks 1 3 5 \
+  --mrr-k 5
+```
+
+### 12.2 Hybrid + Reranker，candidate_k = 10
+
+```bash
+python -m src.paperpilot.cli eval \
+  data/eval/papers_qa_set.jsonl \
+  --index-dir data/benchmark/index \
+  --retrieval-mode hybrid \
+  --fusion-method rrf \
+  --hybrid-alpha 0.5 \
+  --rrf-k 60 \
+  --hybrid-candidate-k 20 \
+  --reranker \
+  --reranker-model cross-encoder/ms-marco-MiniLM-L-6-v2 \
+  --reranker-candidate-k 10 \
+  --reranker-device cpu \
+  --reranker-batch-size 16 \
+  --ks 1 3 5 \
+  --mrr-k 5
+```
+
+### 12.3 Hybrid + Reranker，candidate_k = 20
+
+```bash
+python -m src.paperpilot.cli eval \
+  data/eval/papers_qa_set.jsonl \
+  --index-dir data/benchmark/index \
+  --retrieval-mode hybrid \
+  --fusion-method rrf \
+  --hybrid-alpha 0.5 \
+  --rrf-k 60 \
+  --hybrid-candidate-k 20 \
+  --reranker \
+  --reranker-model cross-encoder/ms-marco-MiniLM-L-6-v2 \
+  --reranker-candidate-k 20 \
+  --reranker-device cpu \
+  --reranker-batch-size 16 \
+  --ks 1 3 5 \
+  --mrr-k 5
+```
+
+---
+
+## 13. 下一阶段
+
+R5 已完成两阶段检索与 Cross-Encoder Reranker 的实现、配置化和正式 benchmark。
+
+下一阶段 R6 主要进行工程收尾：
+
+- README 与项目结构更新；
+- architecture（架构）说明；
+- benchmark 结论整理；
+- 配置和默认值一致性检查；
+- 测试文件整理；
+- known limitations（已知限制）记录；
+- 最终可复现命令整理；
+- 简历项目描述准备。

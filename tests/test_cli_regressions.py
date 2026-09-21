@@ -11,51 +11,122 @@ class FakeRetriever:
 
 
 
-def test_handle_eval_uses_args_ks(monkeypatch):
+def test_handle_eval_uses_args_ks(
+    monkeypatch,
+):
+    """handle_eval 应正确传递 Recall ks 和独立的 MRR depth。"""
+
     captured = {}
 
     monkeypatch.setattr(
         cli.Retriever,
         "from_index",
-        classmethod(lambda cls, **kwargs: FakeRetriever()),
+        classmethod(
+            lambda cls, **kwargs: FakeRetriever()
+        ),
     )
-    monkeypatch.setattr(cli, "load_qa_set", lambda path: [{"question": "q", "expected_keywords": ["x"]}])
 
-    def fake_evaluate_retrieval(*, retriever, qa_items, ks):
+    monkeypatch.setattr(
+        cli,
+        "load_qa_set",
+        lambda path: [
+            {
+                "question": "q",
+                "expected_keywords": ["x"],
+            }
+        ],
+    )
+
+    def fake_evaluate_retrieval(
+        *,
+        retriever,
+        qa_items,
+        ks,
+        mrr_k,
+    ):
         captured["ks"] = ks
+        captured["mrr_k"] = mrr_k
+
         return {
             "total": 1,
             "ks": list(ks),
-            "hit_counts": {k: 0 for k in ks},
-            "recall": {k: 0.0 for k in ks},
+            "hit_counts": {
+                k: 0
+                for k in ks
+            },
+            "recall": {
+                k: 0.0
+                for k in ks
+            },
+            "mrr_k": mrr_k,
+            "mrr": 0.0,
+            "latency_ms": {
+                "mean": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+            },
             "cases": [],
             "failed_cases": [],
         }
 
-    monkeypatch.setattr(cli, "evaluate_retrieval", fake_evaluate_retrieval)
-    monkeypatch.setattr(cli, "print_evaluation_report", lambda **kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "evaluate_retrieval",
+        fake_evaluate_retrieval,
+    )
+
+    monkeypatch.setattr(
+        cli,
+        "print_evaluation_report",
+        lambda **kwargs: None,
+    )
 
     args = Namespace(
+        # Evaluation
         ks=[1, 3, 5],
+        mrr_k=5,
+        qa_path=(
+            "data/eval/qa_set.jsonl"
+        ),
+        show_failed_cases=False,
+        max_failed_cases=10,
+
+        # Index / embedding
         index_dir="data/index",
         model_name="fake-model",
         device="cpu",
         normalize_embeddings=True,
         batch_size=32,
-        qa_path="data/eval/qa_set.jsonl",
-        show_failed_cases=False,
-        max_failed_cases=10,
 
-        # R3 retrieval configuration
+        # Retrieval
         retrieval_mode="hybrid",
         hybrid_alpha=0.5,
         fusion_method="rrf",
         rrf_k=60,
+        hybrid_candidate_k=20,
+
+        # Reranker
+        reranker_enabled=False,
+        reranker_model=(
+            "cross-encoder/"
+            "ms-marco-MiniLM-L-6-v2"
+        ),
+        reranker_candidate_k=20,
+        reranker_device="cpu",
+        reranker_batch_size=16,
     )
 
-    cli.handle_eval(args)
+    cli.handle_eval(
+        args
+    )
 
-    assert captured["ks"] == [1, 3, 5]
+    assert captured["ks"] == [
+        1,
+        3,
+        5,
+    ]
+
+    assert captured["mrr_k"] == 5
 
 
 def test_create_llm_client_mock():

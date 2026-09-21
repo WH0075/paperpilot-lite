@@ -72,8 +72,29 @@ def evaluate_retrieval(
         3,
         5,
     ),
+    mrr_k: int = 5,
 ) -> EvaluationReport:
-    """评估 retrieval 的 Recall@K、MRR@K 和 retrieval latency。"""
+    """评估 retrieval 的 Recall@K、MRR@K 和 retrieval latency。
+
+    Recall 和 MRR 的评测深度彼此独立。
+
+    例如：
+
+        ks = (1, 3, 5, 10, 20)
+        mrr_k = 5
+
+    此时会计算：
+
+        Recall@1
+        Recall@3
+        Recall@5
+        Recall@10
+        Recall@20
+        MRR@5
+
+    Retriever 实际会取 Top-20，以满足最深的 Recall 评测，
+    但 MRR 仍然只检查前 5 个结果。
+    """
 
     if retriever is None:
         raise ValueError(
@@ -94,18 +115,50 @@ def evaluate_retrieval(
         )
 
     ks = _validate_ks(ks)
-    max_k = max(ks)
 
-    # Recall@K 的命中次数。
+    if not isinstance(
+        mrr_k,
+        int,
+    ):
+        raise TypeError(
+            "mrr_k must be an integer"
+        )
+
+    if mrr_k <= 0:
+        raise ValueError(
+            "mrr_k must be positive"
+        )
+
+    # Recall 最深评测到哪个位置。
+    max_recall_k = max(ks)
+
+    # Retriever 实际需要返回多少结果。
+    #
+    # 例如：
+    # Recall 最大需要 Top-20，
+    # MRR 只需要 Top-5，
+    # 那么实际 retrieval depth = 20。
+    retrieval_k = max(
+        max_recall_k,
+        mrr_k,
+    )
+
+    # -------------------------------------------------
+    # Recall@K
+    # -------------------------------------------------
     hit_counts = {
         k: 0
         for k in ks
     }
 
-    # 用于最后计算 MRR@max_k。
+    # -------------------------------------------------
+    # MRR@K
+    # -------------------------------------------------
     reciprocal_rank_sum = 0.0
 
-    # 保存每个 query 的 retrieval latency。
+    # -------------------------------------------------
+    # Retrieval latency
+    # -------------------------------------------------
     latencies_ms: list[float] = []
 
     cases: list[dict[str, Any]] = []
@@ -127,7 +180,7 @@ def evaluate_retrieval(
 
         results = retriever.retrieve(
             query=question,
-            top_k=max_k,
+            top_k=retrieval_k,
         )
 
         latency_ms = (
@@ -141,10 +194,23 @@ def evaluate_retrieval(
 
         # -------------------------------------------------
         # MRR@K
+        #
+        # 非常重要：
+        #
+        # 即使为了 Recall@20 已经取回 20 个结果，
+        # MRR@5 仍然只能检查前 5 个。
+        #
+        # 如果 gold 位于 rank 8：
+        #
+        # Recall@10 = 1
+        # Recall@20 = 1
+        # MRR@5 = 0
         # -------------------------------------------------
+        mrr_results = results[:mrr_k]
+
         first_relevant_rank = (
             find_first_relevant_rank(
-                results=results,
+                results=mrr_results,
                 item=item,
             )
         )
@@ -204,6 +270,9 @@ def evaluate_retrieval(
             "hits": case_hits,
 
             # Ranking quality
+            #
+            # 这里的 first_relevant_rank
+            # 只表示 MRR@mrr_k 范围内的第一个 relevant rank。
             "first_relevant_rank": (
                 first_relevant_rank
             ),
@@ -221,9 +290,17 @@ def evaluate_retrieval(
 
         cases.append(case)
 
-        # max_k 内仍然没有命中 gold evidence。
+        # -------------------------------------------------
+        # Failed cases
+        #
+        # 当前定义为：
+        # 在最大 Recall depth 内仍然没有命中 gold evidence。
+        #
+        # 如果 ks=(1,3,5,10,20)，
+        # 那么这里表示 Recall@20 失败。
+        # -------------------------------------------------
         if not case_hits[
-            f"Recall@{max_k}"
+            f"Recall@{max_recall_k}"
         ]:
             failed_cases.append(case)
 
@@ -238,7 +315,7 @@ def evaluate_retrieval(
     }
 
     # -------------------------------------------------
-    # MRR@max_k
+    # MRR@K
     # -------------------------------------------------
     mrr = (
         reciprocal_rank_sum
@@ -264,14 +341,15 @@ def evaluate_retrieval(
 
     return {
         "total": total,
+
         "ks": list(ks),
 
         "hit_counts": hit_counts,
+
         "recall": recall,
 
-        # 如果 ks = [1, 3, 5]，
-        # 当前指标就是 MRR@5。
-        "mrr_k": max_k,
+        # MRR depth 与 Recall depth 独立。
+        "mrr_k": mrr_k,
         "mrr": mrr,
 
         "latency_ms": {
@@ -339,8 +417,15 @@ def check_hit(
 
     chunk_hit = False
 
+    # -------------------------------------------------
+    # Strict chunk-level evaluation
+    #
     # 如果存在 expected_chunk_ids，
-    # 严格使用 gold chunk 作为最终判定标准。
+    # 则必须命中指定 gold chunk。
+    #
+    # 即使找到了正确论文，
+    # 但 chunk 不正确，也不算最终命中。
+    # -------------------------------------------------
     if "expected_chunk_ids" in item:
         expected_chunk_ids = set(
             item["expected_chunk_ids"]
@@ -384,6 +469,9 @@ def find_first_relevant_rank(
 
     如果当前 results 中没有命中 gold evidence，
     则返回 None。
+
+    Recall 与 MRR 都通过 check_hit()
+    使用同一套 relevance definition（相关性定义）。
     """
 
     if not isinstance(
@@ -398,9 +486,6 @@ def find_first_relevant_rank(
         results,
         start=1,
     ):
-        # 复用 check_hit()，
-        # 保证 Recall 和 MRR 使用完全相同的
-        # relevance definition。
         hit_info = check_hit(
             results=[result],
             item=item,
@@ -458,6 +543,7 @@ def summarize_results(
         summaries.append(
             {
                 "rank": rank,
+
                 "file_name": (
                     metadata.get(
                         "file_name"
@@ -466,12 +552,15 @@ def summarize_results(
                         "source"
                     )
                 ),
+
                 "page": metadata.get(
                     "page"
                 ),
+
                 "chunk_id": metadata.get(
                     "chunk_id"
                 ),
+
                 "score": (
                     float(score)
                     if isinstance(
@@ -480,6 +569,7 @@ def summarize_results(
                     )
                     else score
                 ),
+
                 "text_preview": (
                     text[:max_text_chars]
                 ),
@@ -497,9 +587,11 @@ def print_evaluation_report(
     """打印 Retrieval Evaluation 报告。"""
 
     print("=" * 80)
+
     print(
         "Retrieval Evaluation Report"
     )
+
     print("=" * 80)
 
     print(
@@ -579,9 +671,13 @@ def print_evaluation_report(
 
     print()
 
+    max_recall_k = max(
+        report["ks"]
+    )
+
     print(
         f"Failed cases at "
-        f"Recall@{max(report['ks'])}: "
+        f"Recall@{max_recall_k}: "
         f"{len(failed_cases)}"
     )
 
@@ -590,16 +686,20 @@ def print_evaluation_report(
         and failed_cases
     ):
         print()
+
         print("=" * 80)
+
         print(
             "Failed Case Details"
         )
+
         print("=" * 80)
 
         for case in failed_cases[
             :max_failed_cases
         ]:
             print()
+
             print("-" * 80)
 
             print(
@@ -671,10 +771,29 @@ def evaluate_retrieval_from_index(
         3,
         5,
     ),
+    mrr_k: int = 5,
 ) -> EvaluationReport:
     """从保存的 index 直接执行 retrieval evaluation。"""
 
     ks = _validate_ks(ks)
+
+    if not isinstance(
+        mrr_k,
+        int,
+    ):
+        raise TypeError(
+            "mrr_k must be an integer"
+        )
+
+    if mrr_k <= 0:
+        raise ValueError(
+            "mrr_k must be positive"
+        )
+
+    retrieval_k = max(
+        max(ks),
+        mrr_k,
+    )
 
     retriever = Retriever.from_index(
         index_dir=index_dir,
@@ -684,7 +803,7 @@ def evaluate_retrieval_from_index(
             normalize_embeddings
         ),
         batch_size=batch_size,
-        default_top_k=max(ks),
+        default_top_k=retrieval_k,
     )
 
     qa_items = load_qa_set(
@@ -695,6 +814,7 @@ def evaluate_retrieval_from_index(
         retriever=retriever,
         qa_items=qa_items,
         ks=ks,
+        mrr_k=mrr_k,
     )
 
 
@@ -705,6 +825,7 @@ def _percentile(
     """使用线性插值计算 percentile。
 
     percentile 使用 0~1 范围：
+
     0.50 -> P50
     0.95 -> P95
     """
@@ -730,8 +851,13 @@ def _percentile(
     if len(sorted_values) == 1:
         return sorted_values[0]
 
-    # 例如 N=4、P50：
-    # position = (4 - 1) * 0.5 = 1.5
+    # 例如：
+    #
+    # N = 4
+    # P50
+    #
+    # position = (4 - 1) * 0.5
+    #          = 1.5
     position = (
         len(sorted_values) - 1
     ) * percentile

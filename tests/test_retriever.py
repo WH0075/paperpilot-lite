@@ -534,3 +534,169 @@ def test_hybrid_rejects_invalid_rrf_k():
             fusion_method="rrf",
             rrf_k=0,
         )
+
+
+def test_hybrid_rrf_keeps_prefix_consistent_across_top_k(
+    monkeypatch,
+):
+    """Top-5 应等于同一 Hybrid 排名的 Top-20 前五项。"""
+
+    class DummyEmbedder:
+        """测试中不会真正执行 embedding。"""
+
+        pass
+
+    class DummyVectorStore:
+        """只提供 Retriever 初始化需要的 chunks。"""
+
+        def __init__(
+            self,
+            chunk_count: int = 100,
+        ) -> None:
+            self.chunks = [
+                {
+                    "text": f"chunk {i}",
+                    "metadata": {
+                        "chunk_id": (
+                            f"test.pdf:1:{i}"
+                        ),
+                    },
+                }
+                for i in range(
+                    chunk_count
+                )
+            ]
+
+    retriever = Retriever(
+        embedder=DummyEmbedder(),
+        vector_store=DummyVectorStore(
+            chunk_count=100
+        ),
+        default_mode="hybrid",
+        hybrid_candidate_k=20,
+    )
+
+    requested_depths = []
+
+    def fake_dense(
+        query,
+        top_k,
+    ):
+        requested_depths.append(
+            (
+                "dense",
+                top_k,
+            )
+        )
+
+        return [
+            {
+                "text": f"chunk {i}",
+                "metadata": {
+                    "chunk_id": (
+                        f"test.pdf:1:{i}"
+                    ),
+                },
+                "index": i,
+                "score": float(
+                    top_k - i
+                ),
+            }
+            for i in range(
+                top_k
+            )
+        ]
+
+    def fake_keyword(
+        query,
+        top_k,
+    ):
+        requested_depths.append(
+            (
+                "keyword",
+                top_k,
+            )
+        )
+
+        return [
+            {
+                "text": f"chunk {i}",
+                "metadata": {
+                    "chunk_id": (
+                        f"test.pdf:1:{i}"
+                    ),
+                },
+                "index": i,
+                "score": float(
+                    top_k - i
+                ),
+            }
+            for i in range(
+                top_k
+            )
+        ]
+
+    monkeypatch.setattr(
+        retriever,
+        "_retrieve_dense",
+        fake_dense,
+    )
+
+    monkeypatch.setattr(
+        retriever,
+        "_retrieve_keyword",
+        fake_keyword,
+    )
+
+    # -------------------------------------------------
+    # 请求 Top-5
+    # -------------------------------------------------
+    top_5 = retriever.retrieve(
+        query="query",
+        top_k=5,
+    )
+
+    # -------------------------------------------------
+    # 请求 Top-20
+    # -------------------------------------------------
+    top_20 = retriever.retrieve(
+        query="query",
+        top_k=20,
+    )
+
+    # -------------------------------------------------
+    # Prefix consistency
+    #
+    # Top-5 应该与 Top-20 的前 5 项完全一致。
+    # -------------------------------------------------
+    assert [
+        result["index"]
+        for result in top_5
+    ] == [
+        result["index"]
+        for result in top_20[:5]
+    ]
+
+    # -------------------------------------------------
+    # 两次查询虽然最终 top_k 不同，
+    # 但 Hybrid 内部 Dense / BM25
+    # 都应该固定使用 candidate_k=20。
+    # -------------------------------------------------
+    assert requested_depths == [
+        (
+            "dense",
+            20,
+        ),
+        (
+            "keyword",
+            20,
+        ),
+        (
+            "dense",
+            20,
+        ),
+        (
+            "keyword",
+            20,
+        ),
+    ]

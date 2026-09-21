@@ -3,6 +3,7 @@ import json
 import pytest
 
 from src.paperpilot.evaluator import (
+    _percentile,
     check_hit,
     evaluate_retrieval,
     find_first_relevant_rank,
@@ -249,10 +250,7 @@ def test_summarize_results():
         == "rag_intro.txt"
     )
 
-    assert (
-        summaries[0]["page"]
-        == 1
-    )
+    assert summaries[0]["page"] == 1
 
     assert (
         summaries[0]["chunk_id"]
@@ -283,9 +281,7 @@ def test_find_first_relevant_rank_returns_one_for_top_result():
             "score": 0.9,
         },
         {
-            "text": (
-                "Some unrelated text."
-            ),
+            "text": "Some unrelated text.",
             "metadata": {
                 "file_name": "other.txt",
                 "chunk_id": (
@@ -441,7 +437,7 @@ def test_find_first_relevant_rank_returns_none_when_missing():
 
 
 class FakeMRRRetriever:
-    """构造确定排名的 Retriever，用于验证 MRR 数学逻辑。"""
+    """构造确定排名的 Retriever，用于验证 MRR 和 latency report。"""
 
     def retrieve(
         self,
@@ -502,7 +498,7 @@ class FakeMRRRetriever:
         return results[:top_k]
 
 
-def test_evaluate_retrieval_calculates_mrr():
+def test_evaluate_retrieval_calculates_mrr_and_latency():
     retriever = FakeMRRRetriever()
 
     qa_items = [
@@ -530,25 +526,26 @@ def test_evaluate_retrieval_calculates_mrr():
         retriever=retriever,
         qa_items=qa_items,
         ks=[1, 2],
+        mrr_k=2,
     )
 
-    # Evaluation depth 是 Top-2，
-    # 因此这里计算的是 MRR@2。
+    # -------------------------------------------------
+    # MRR
+    #
+    # q1: rank 1 -> RR = 1
+    # q2: rank 2 -> RR = 1/2
+    # q3: missing -> RR = 0
+    #
+    # MRR@2 = (1 + 0.5 + 0) / 3 = 0.5
+    # -------------------------------------------------
     assert report["mrr_k"] == 2
 
-    # q1: RR = 1
-    # q2: RR = 1/2
-    # q3: RR = 0
-    #
-    # MRR = (1 + 0.5 + 0) / 3
-    #     = 0.5
     assert report["mrr"] == pytest.approx(
         0.5
     )
 
     cases = report["cases"]
 
-    # q1
     assert (
         cases[0]["first_relevant_rank"]
         == 1
@@ -559,7 +556,6 @@ def test_evaluate_retrieval_calculates_mrr():
         == pytest.approx(1.0)
     )
 
-    # q2
     assert (
         cases[1]["first_relevant_rank"]
         == 2
@@ -570,7 +566,6 @@ def test_evaluate_retrieval_calculates_mrr():
         == pytest.approx(0.5)
     )
 
-    # q3
     assert (
         cases[2]["first_relevant_rank"]
         is None
@@ -580,3 +575,306 @@ def test_evaluate_retrieval_calculates_mrr():
         cases[2]["reciprocal_rank"]
         == pytest.approx(0.0)
     )
+
+    # -------------------------------------------------
+    # Latency
+    #
+    # 不能测试具体毫秒值，因为运行时间具有随机性。
+    # 这里只验证统计结构和基本关系。
+    # -------------------------------------------------
+    latency = report[
+        "latency_ms"
+    ]
+
+    assert (
+        latency["mean"]
+        >= 0.0
+    )
+
+    assert (
+        latency["p50"]
+        >= 0.0
+    )
+
+    assert (
+        latency["p95"]
+        >= 0.0
+    )
+
+    assert (
+        latency["p50"]
+        <= latency["p95"]
+    )
+
+    # 每一个 case 也应该保存自己的 latency。
+    for case in cases:
+        assert (
+            case["latency_ms"]
+            >= 0.0
+        )
+
+
+def test_percentile():
+    values = [
+        10.0,
+        20.0,
+        30.0,
+        40.0,
+    ]
+
+    # 中位数：
+    # 20 和 30 的中间值 = 25
+    assert _percentile(
+        values,
+        0.50,
+    ) == pytest.approx(
+        25.0
+    )
+
+    # 最小值
+    assert _percentile(
+        values,
+        0.0,
+    ) == pytest.approx(
+        10.0
+    )
+
+    # 最大值
+    assert _percentile(
+        values,
+        1.0,
+    ) == pytest.approx(
+        40.0
+    )
+
+
+def test_percentile_single_value():
+    assert _percentile(
+        [42.0],
+        0.95,
+    ) == pytest.approx(
+        42.0
+    )
+
+
+def test_percentile_rejects_empty_values():
+    with pytest.raises(
+        ValueError,
+        match="values must not be empty",
+    ):
+        _percentile(
+            [],
+            0.50,
+        )
+
+
+@pytest.mark.parametrize(
+    "percentile",
+    [
+        -0.1,
+        1.1,
+    ],
+)
+def test_percentile_rejects_invalid_percentile(
+    percentile,
+):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "percentile must be "
+            "between 0 and 1"
+        ),
+    ):
+        _percentile(
+            [
+                10.0,
+                20.0,
+            ],
+            percentile,
+        )
+
+
+class FakeDeepRecallRetriever:
+    """用于测试 Recall@20 与 MRR@5 分离。"""
+
+    def retrieve(
+        self,
+        query,
+        top_k,
+    ):
+        results = []
+
+        for rank in range(1, top_k + 1):
+            chunk_id = (
+                "paper.pdf:1:gold"
+                if rank == 8
+                else f"paper.pdf:1:wrong-{rank}"
+            )
+
+            results.append(
+                {
+                    "text": f"chunk at rank {rank}",
+                    "metadata": {
+                        "file_name": "paper.pdf",
+                        "chunk_id": chunk_id,
+                    },
+                    "index": rank - 1,
+                    "score": float(
+                        top_k - rank
+                    ),
+                }
+            )
+
+        return results
+
+
+def test_recall_depth_is_independent_from_mrr_depth():
+    retriever = FakeDeepRecallRetriever()
+
+    qa_items = [
+        {
+            "id": "q1",
+            "question": "test question",
+            "expected_source_file": "paper.pdf",
+            "expected_chunk_ids": [
+                "paper.pdf:1:gold",
+            ],
+        }
+    ]
+
+    report = evaluate_retrieval(
+        retriever=retriever,
+        qa_items=qa_items,
+        ks=(1, 3, 5, 10, 20),
+        mrr_k=5,
+    )
+
+    assert report["recall"][1] == pytest.approx(0.0)
+    assert report["recall"][3] == pytest.approx(0.0)
+    assert report["recall"][5] == pytest.approx(0.0)
+
+    assert report["recall"][10] == pytest.approx(1.0)
+    assert report["recall"][20] == pytest.approx(1.0)
+
+    assert report["mrr_k"] == 5
+    assert report["mrr"] == pytest.approx(0.0)
+
+
+class FakeDeepRecallRetriever:
+    """用于测试 Recall depth 与 MRR depth 相互独立。"""
+
+    def retrieve(
+        self,
+        query,
+        top_k,
+    ):
+        results = []
+
+        for rank in range(
+            1,
+            top_k + 1,
+        ):
+            chunk_id = (
+                "paper.pdf:1:gold"
+                if rank == 8
+                else (
+                    f"paper.pdf:1:"
+                    f"wrong-{rank}"
+                )
+            )
+
+            results.append(
+                {
+                    "text": (
+                        f"chunk at rank "
+                        f"{rank}"
+                    ),
+                    "metadata": {
+                        "file_name": (
+                            "paper.pdf"
+                        ),
+                        "chunk_id": (
+                            chunk_id
+                        ),
+                    },
+                    "index": rank - 1,
+                    "score": float(
+                        top_k - rank
+                    ),
+                }
+            )
+
+        return results
+
+
+def test_recall_depth_is_independent_from_mrr_depth():
+    """
+    gold 位于 rank 8。
+
+    因此：
+    Recall@5  = 0
+    Recall@10 = 1
+    Recall@20 = 1
+
+    但 MRR@5 仍然必须为 0。
+    """
+
+    retriever = (
+        FakeDeepRecallRetriever()
+    )
+
+    qa_items = [
+        {
+            "id": "q1",
+            "question": (
+                "test question"
+            ),
+            "expected_source_file": (
+                "paper.pdf"
+            ),
+            "expected_chunk_ids": [
+                "paper.pdf:1:gold",
+            ],
+        }
+    ]
+
+    report = evaluate_retrieval(
+        retriever=retriever,
+        qa_items=qa_items,
+        ks=(
+            1,
+            3,
+            5,
+            10,
+            20,
+        ),
+        mrr_k=5,
+    )
+
+    assert report[
+        "recall"
+    ][1] == pytest.approx(0.0)
+
+    assert report[
+        "recall"
+    ][3] == pytest.approx(0.0)
+
+    assert report[
+        "recall"
+    ][5] == pytest.approx(0.0)
+
+    assert report[
+        "recall"
+    ][10] == pytest.approx(1.0)
+
+    assert report[
+        "recall"
+    ][20] == pytest.approx(1.0)
+
+    assert report[
+        "mrr_k"
+    ] == 5
+
+    assert report[
+        "mrr"
+    ] == pytest.approx(0.0)
