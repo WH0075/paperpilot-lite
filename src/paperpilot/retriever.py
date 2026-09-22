@@ -26,7 +26,7 @@ class Retriever:
         rrf_k: int = 60,
         hybrid_candidate_k: int = 20,
         reranker: CrossEncoderReranker | None = None,
-        reranker_candidate_k: int = 20,
+        reranker_candidate_k: int = 10,
     ) -> None:
         """初始化 Retriever。"""
 
@@ -958,7 +958,7 @@ class Retriever:
         rrf_k: int = 60,
         hybrid_candidate_k: int = 20,
         reranker: CrossEncoderReranker | None = None,
-        reranker_candidate_k: int = 20,
+        reranker_candidate_k: int = 10,
     ) -> "Retriever":
         """从已经保存的向量索引目录创建 Retriever。"""
 
