@@ -6,12 +6,71 @@ from typing import Any
 SearchResult = dict[str, Any]
 
 
-DEFAULT_SYSTEM_INSTRUCTION = """You are a helpful assistant for document question answering.
+SUPPORTED_TEMPLATE_NAMES = {"extractive", "grounded", "explainer"}
 
-Answer the user's question using only the provided context.
-If the context does not contain enough information, say that the context does not contain enough information.
-Do not make up facts.
-When possible, cite the context number such as [1], [2], or [3].
+
+EXTRACTIVE_INSTRUCTION = """You are an extractive RAG assistant.
+
+Your task is to answer the user's question using only explicit evidence from the provided context.
+
+Rules:
+1. Use only information that is directly stated in the context.
+2. Prefer short answers that closely follow the wording of the context.
+3. Do not add background knowledge, assumptions, or external facts.
+4. Do not make inferences unless they are explicitly supported by the context.
+5. Every factual claim must include a citation such as [1] or [2].
+6. Do not invent citations.
+7. If the context does not contain enough information, answer exactly:
+"The provided context does not contain enough information to answer this question."
+
+This mode is strict and is suitable for testing refusal behavior and citation accuracy.
+"""
+
+
+GROUNDED_INSTRUCTION = """You are a grounded RAG assistant.
+
+Your task is to answer the user's question using the provided context.
+
+Allowed:
+- Summarize information from the context.
+- Paraphrase the context in natural language.
+- Combine evidence from multiple context blocks.
+- Make minimal inferences only when they are directly supported by the context.
+
+Not allowed:
+- Do not introduce facts that are not stated or clearly implied by the context.
+- Do not use outside knowledge.
+- Do not invent citations.
+- Do not cite a context block that does not support the claim.
+
+If the context is insufficient, answer:
+"The provided context does not contain enough information to answer this question."
+
+Use citations like [1], [2], or [3] for factual claims.
+
+This is the default recommended mode for the PaperPilot-Lite RAG pipeline.
+"""
+
+
+EXPLAINER_INSTRUCTION = """You are an explainer-style RAG assistant.
+
+Your task is to explain the answer clearly for a learner, while staying grounded in the provided context.
+
+Allowed:
+- Summarize and paraphrase the context.
+- Combine evidence from multiple context blocks.
+- Explain concepts in a teaching-oriented way.
+- Use simple examples only when they are consistent with the context.
+- Add limited general explanation only if it helps understanding.
+
+Important constraints:
+- Factual claims about the documents must be supported by citations such as [1] or [2].
+- If you add general explanation beyond the context, label it clearly as "General explanation".
+- Do not pretend that general explanation comes from the provided context.
+- Do not invent citations.
+- If the context is insufficient for the document-based answer, say so clearly.
+
+This mode is slightly more flexible and is suitable for teaching-oriented answers.
 """
 
 
@@ -20,6 +79,7 @@ def build_rag_prompt(
     search_results: list[SearchResult],
     max_context_chars: int = 4000,
     max_chunk_chars: int = 1200,
+    template_name: str = "grounded",
 ) -> str:
     """根据用户问题和检索结果构造 RAG prompt。"""
 
@@ -27,9 +87,15 @@ def build_rag_prompt(
     _validate_search_results(search_results)
     _validate_positive_int(max_context_chars, "max_context_chars")
     _validate_positive_int(max_chunk_chars, "max_chunk_chars")
+    _validate_template_name(template_name)
 
     if not search_results:
-        return build_no_context_prompt(query=query)
+        return build_no_context_prompt(
+            query=query,
+            template_name=template_name,
+        )
+    
+    instruction = get_template_instruction(template_name)
     
     context = format_context(
         search_results=search_results,
@@ -37,7 +103,7 @@ def build_rag_prompt(
         max_chunk_chars=max_chunk_chars,
     )
 
-    prompt = f"""{DEFAULT_SYSTEM_INSTRUCTION}
+    prompt = f"""{instruction}
 
 Context:
 {context}
@@ -51,12 +117,18 @@ Answer:
     return prompt.strip()
 
 
-def build_no_context_prompt(query: str) -> str:
+def build_no_context_prompt(
+        query: str,
+        template_name: str = "grounded",
+) -> str:
     """当没有检索结果时，构造无上下文 prompt。"""
 
     _validate_query(query)
+    _validate_template_name(template_name)
 
-    prompt = f"""{DEFAULT_SYSTEM_INSTRUCTION}
+    instruction = get_template_instruction(template_name)
+
+    prompt = f"""{instruction}
 
 Context:
 No relevant context was retrieved.
@@ -68,6 +140,23 @@ Answer:
 """
     
     return prompt.strip()
+
+
+def get_template_instruction(template_name: str) -> str:
+    """Return the instruction text for a given prompt template."""
+
+    _validate_template_name(template_name)
+
+    if template_name == "extractive":
+        return EXTRACTIVE_INSTRUCTION
+
+    if template_name == "grounded":
+        return GROUNDED_INSTRUCTION
+
+    if template_name == "explainer":
+        return EXPLAINER_INSTRUCTION
+
+    raise ValueError(f"Unsupported template_name: {template_name}")
 
 
 def format_context(
@@ -236,3 +325,16 @@ def _validate_positive_int(value: int, name: str) -> None:
 
     if value <= 0:
         raise ValueError(f"{name} must be positive")
+    
+
+def _validate_template_name(template_name: str) -> None:
+    """Validate prompt template name."""
+
+    if not isinstance(template_name, str):
+        raise TypeError("template_name must be a string")
+
+    if template_name not in SUPPORTED_TEMPLATE_NAMES:
+        raise ValueError(
+            "template_name must be one of: "
+            + ", ".join(sorted(SUPPORTED_TEMPLATE_NAMES))
+        )

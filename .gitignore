@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 logs/
 data/index/
+data/benchmark/raw/
+data/benchmark/index/
 *.log
 .env
 .DS_Store

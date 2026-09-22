@@ -12,9 +12,138 @@ chunking:
 
 retrieval:
   top_k: 5
+
+  # Retrieval strategy:
+  # dense | keyword | hybrid
+  mode: "hybrid"
+
+  # --------------------------------------------------
+  # Hybrid retrieval configuration
+  # --------------------------------------------------
+
+  # alpha controls the dense contribution:
+  #
+  # 1.0 = dense only
+  # 0.0 = keyword only
+  hybrid_alpha: 0.5
+
+  # Hybrid fusion strategy:
+  #
+  # minmax | rrf
+  fusion_method: "rrf"
+
+  # Reciprocal Rank Fusion smoothing constant.
+  rrf_k: 60
+
+  # Dense / BM25 各自参与 Hybrid fusion
+  # 的候选数量。
+  #
+  # 例如：
+  #
+  # hybrid_candidate_k = 20
+  # top_k = 5
+  #
+  # Dense Top-20
+  # +
+  # BM25 Top-20
+  # ->
+  # RRF fusion
+  # ->
+  # Final Top-5
+  #
+  # 该参数与最终 top_k 独立，
+  # 用于保证不同 top_k 下的 Hybrid
+  # ranking prefix 尽量保持一致。
+  hybrid_candidate_k: 20
+
+  # --------------------------------------------------
+  # Dense retrieval configuration
+  # --------------------------------------------------
+
   embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+
   similarity: "cosine"
+
+  device: "cpu"
+
+  batch_size: 32
+
+  normalize_embeddings: true
+
+  # --------------------------------------------------
+  # Second-stage Cross-Encoder Reranker
+  # --------------------------------------------------
+  #
+  # Pipeline:
+  #
+  # Dense + BM25
+  #      |
+  #      v
+  # Hybrid RRF
+  #      |
+  #      v
+  # Candidate Top-K
+  #      |
+  #      v
+  # Cross-Encoder Reranker
+  #      |
+  #      v
+  # Final Top-K
+  #
+  # 默认关闭，保证原有 R4 retrieval baseline
+  # 和现有 CLI 行为不会被自动改变。
+  reranker:
+    enabled: false
+
+    # Cross-Encoder passage ranking model.
+    model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # 第一阶段 Retrieval 交给 Reranker
+    # 的候选数量。
+    #
+    # 例如：
+    #
+    # candidate_k = 20
+    # retrieval.top_k = 5
+    #
+    # Hybrid Top-20
+    # ->
+    # Cross-Encoder
+    # ->
+    # Final Top-5
+    candidate_k: 10
+
+    # Cross-Encoder inference device.
+    device: "cpu"
+
+    # Cross-Encoder predict batch size.
+    batch_size: 16
+
+prompt:
+  template_name: "grounded"
+
+  max_context_chars: 4000
+
+  max_chunk_chars: 1200
+
+llm:
+  # Keep mock as the safe default so tests and local development
+  # never make accidental paid API calls.
+  provider: "mock"
+
+  model_name: null
+
+  base_url: null
+
+  temperature: 0.2
+
+  max_tokens: 512
+
+  thinking_enabled: false
+
+  timeout: 60
 
 logging:
   log_file: "logs/app.log"
+
   level: "INFO"
