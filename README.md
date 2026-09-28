@@ -84,29 +84,24 @@ Embedding + Index
 
 ## 📊 Benchmark
 
-当前 Benchmark：
-
-- 8 篇公开论文
-- 1376 个 chunk
-- 64 条 query
-- 使用严格 `expected_chunk_ids` 作为 Gold Evidence
+Benchmark 使用 **8 篇公开论文、1376 个 chunk、64 条 query**，采用严格 `expected_chunk_ids` 进行 chunk-level evidence evaluation。
 
 | 方法 | Recall@1 | Recall@3 | Recall@5 | MRR@5 | Mean Latency |
 |---|---:|---:|---:|---:|---:|
-| Dense | 0.2188 | 0.4375 | 0.5625 | 0.3432 | 105.33 ms |
-| BM25 | 0.2969 | 0.6094 | 0.7656 | 0.4638 | 4.25 ms |
-| Hybrid RRF | 0.3594 | 0.6562 | 0.7500 | 0.5052 | 107.80 ms |
-| Hybrid + Reranker (`k=10`) | **0.5000** | **0.6875** | 0.7812 | **0.6068** | 353.91 ms |
-| Hybrid + Reranker (`k=20`) | 0.4844 | **0.6875** | **0.8125** | 0.6060 | 636.31 ms |
+| Dense | 0.2188 | 0.4375 | 0.5625 | 0.3432 | 103.24 ms |
+| BM25 | 0.2969 | 0.6094 | 0.7656 | 0.4638 | 4.39 ms |
+| Hybrid Min-Max | 0.3438 | 0.6406 | 0.7656 | 0.4977 | 101.83 ms |
+| Hybrid RRF | 0.3594 | 0.6562 | 0.7500 | 0.5052 | 101.87 ms |
+| Hybrid RRF + Reranker (`k=10`) | **0.5000** | **0.6875** | **0.7812** | **0.6068** | 355.37 ms |
 
 主要结论：
 
-- BM25 在技术论文场景中是很强的 baseline。
-- Hybrid RRF 明显改善前部排序质量。
-- Cross-Encoder 进一步提升 Recall@1 和 MRR@5，但增加推理延迟。
-- `candidate_k=10` 在当前实验中提供较好的质量—延迟折中。
+- BM25 在当前技术论文数据上是较强的 baseline；
+- Hybrid 的主要收益体现在 Recall@1、Recall@3 和 MRR@5，即改善前部排序；
+- Cross-Encoder 将 **Recall@1 从 0.3594 提升至 0.5000、MRR@5 从 0.5052 提升至 0.6068**；
+- `candidate_k=5/10/20/40` 消融表明，`k=10` 在当前实验中提供更合理的质量—延迟折中：继续扩大到 `k=20` 仅提高 Recall@5，但平均延迟由 **356 ms 增至 650 ms**；`k=40` 延迟超过 **1.1 s** 且排序指标出现下降。
 
-完整实验见 [`docs/BENCHMARK.md`](docs/BENCHMARK.md)。
+完整实验设置、参数消融与复现方法见 [`docs/BENCHMARK.md`](docs/BENCHMARK.md)。
 
 ---
 
